@@ -17,7 +17,7 @@ JAMR depends on
 
 Install these dependencies, and then change the environment variables in
 `scripts/config.sh` to point at their executables.
-Source `. ./scripts/config.sh`, so that other bash scripts have access to these envvars.
+Source `. ./scripts/config.sh`, so that other bash scripts have access to these envvars (JAMR has only been tested with the `bash` shell).
  
 Run `./compile` to build an uberjar, which will be output to
     `target/scala-{scala_version}/jamr-assembly-{jamr_version}.jar`
