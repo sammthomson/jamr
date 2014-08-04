@@ -3,17 +3,24 @@ JAMR - AMR Parser
 
 JAMR is a semantic parser for the [Abstract Meaning Representation](http://amr.isi.edu/).
 
-- We will be providing trained models in a ready-to-go package soon.
-
 
 Building
 ========
 
 JAMR depends on
 
- * the [Illinois NER system](http://cogcomp.cs.illinois.edu/page/download_view/NETagger) v2.3,
- * the tokenization scripts in [cdec](https://github.com/redpony/cdec), and 
- * the [Stanford Parser](http://nlp.stanford.edu/software/lex-parser.shtml).
+ * [Scala](http://www.scala-lang.org),
+ * the [Illinois NER system](http://cogcomp.cs.illinois.edu/page/download_view/NETagger),
+ * the tokenization scripts in [cdec](https://github.com/redpony/cdec),
+ * [WordNet](http://wordnetcode.princeton.edu/3.0/WordNet-3.0.tar.gz) (for the aligner).
+
+
+Install these dependencies, and then change the relevant environment variables in
+`scripts/config.sh`.
+Source the config script so that other bash scripts have access to these environment variables (or 
+add them to ~/.bashrc to set them permanently):
+
+    . scripts/config.sh
 
 Install these dependencies, and then change the environment variables in
 `scripts/config.sh` to point at their executables.
@@ -21,21 +28,26 @@ Source `. ./scripts/config.sh`, so that other bash scripts have access to these 
  
 Run `./compile` to build an uberjar, which will be output to
     `target/scala-{scala_version}/jamr-assembly-{jamr_version}.jar`
-
+(If you get out of memory errors during this step, you may need to edit the Java memory options
+in the script `sbt` and `build.sbt`.)
 
 Preprocessing
 =============
 
 Download `LDC2013E117.tgz` from the LDC Catalog (requires an LDC subscription).
-Extract the file `deft-amr-release-r3-proxy.txt` into `data/LDC-2013-Sep/`.
+Extract the file `deft-amr-release-r3-proxy.txt` into `data/LDC-2013-Sep/` and rename it
+`amr-release-proxy.txt`.
 
     cd scripts/preprocessing
 
-Run `./PREPROCESS.sh` (not tested).
+Run `./PREPROCESS.sh`.
 
 
 Training
 ========
+
+(To skip this step, download and extract model weights [current.tgz](http://cs.cmu.edu/~jmflanig/current.tgz) 
+into the directory experiments/current.)
 
     cd scripts/training
 
@@ -67,4 +79,6 @@ Decode test set:
 
 Evaluate the predictions using smatch:
 
-    ./scripts/smatch_v1_0/smatch_modified.py --pr -f test.decode.allstages data/LDC-2013-Sep/amr-release-proxy.test
+    ${JAMR_HOME}/scripts/smatch_v1_0/smatch_modified.py --pr -f ${JAMR_HOME}/experiments/current/test.decode.allstages ${JAMR_HOME}/data/LDC-2013-Sep/amr-release-proxy.test
+    ${JAMR_HOME}/scripts/smatch_v1_0/smatch_modified.py --pr -f ${JAMR_HOME}/experiments/current/test.decode.stage2only ${JAMR_HOME}/data/LDC-2013-Sep/amr-release-proxy.test
+

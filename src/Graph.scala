@@ -4,6 +4,7 @@ import scala.collection.mutable.Map
 import scala.collection.mutable.Set
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.immutable.Queue
+import scala.collection.immutable
 import scala.util.parsing.combinator._
 
 case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[String, Node], getNodeByName: Map[String, Node]) {
@@ -261,20 +262,37 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
     }
 */
 
-    private def makeIds(node: Node = root, id: List[Int] = List(0)) {
+    def sortRelations() {
+        // Sorts the nodes in topological ordering by the label name
+        // WARNING: This should be called only after assignOpN
+        doRecursive(x => {x.topologicalOrdering = x.topologicalOrdering.sortBy(_._1)}, root)
+    }
+
+    def makeIds() {
         // Sets the node.id field for every node in the graph according to the topologicalOrdering
         // For example "0" is the root and "0.1" is the 2nd child of the root
         // Assumes that a topological ordering already exists (node.topologicalOrdering is non-empty)
-        if (node == root) {
-            getNodeById.clear
-        }
-        node.id = id.mkString(".")
-        getNodeById += (node.id -> node)
-        for (((_,child), i) <- node.topologicalOrdering.zipWithIndex) {
-            makeIds(child, id ::: List(i))
+        getNodeById.clear
+        val oldToNew = makeIds(root)
+        for (span <- spans) {
+            span.nodeIds = span.nodeIds.map(x => oldToNew(x))
+            doRecursive(x => x.id = oldToNew.getOrElse(x.id, { logger(0, "WARNING: makeIds can't find span Id: "+x.id); x.id }), span.amr)
         }
     }
 
+    def makeIds(node: Node, id: List[Int] = List(0)) : immutable.Map[String, String] = {
+        // Sets the node.id field for every node in the graph according to the topologicalOrdering
+        // For example "0" is the root and "0.1" is the 2nd child of the root
+        // Assumes that a topological ordering already exists (node.topologicalOrdering is non-empty)
+        val newId = id.mkString(".")
+        var oldIdToNewId : immutable.Map[String, String] = immutable.Map(node.id -> newId)
+        node.id = newId
+        getNodeById += (node.id -> node)
+        for (((label,child), i) <- node.topologicalOrdering.zipWithIndex) {
+            oldIdToNewId ++= makeIds(child, id ::: List(i))
+        }
+        return oldIdToNewId
+    }
 
     private def makeVariables(node: Node = root) {
     // TODO: this can be simplified using getNodeById and 'nodes'
@@ -439,11 +457,10 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
             vars += root.name.get
         }
         doRecursive(node => vars ++= node.variableRelations.map(_._2.name))
-        assignOpN
         return root.prettyString(detail, pretty, vars)
     }
 
-    def assignOpN {
+    def assignOpN() {
         def numberOps(relations: List[(String, Node)]) : List[(String, Node)] = {
             val ops = relations.filter(x => x._1 == ":op")
             val opNs = ops.sortBy(x => spans(x._2.spans(0)).start).zipWithIndex.map(x => (x._1._1 + (x._2+1).toString, x._1._2))

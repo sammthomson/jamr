@@ -91,7 +91,7 @@ class TrainObj(val options : Map[Symbol, String]) extends edu.cmu.lti.nlp.amr.Tr
     def costAugmented(i: Int, weights: FeatureVector, scale: Double) : (FeatureVector, Double) = {
         val decoder = Decoder(options)
         decoder.features.weights = weights
-        val costAug = new CostAugmented(Decoder(options), scale, options.getOrElse('precRecallTradeoff,"0.5").toDouble)
+        val costAug = new CostAugmented(Decoder(options), scale, options.getOrElse('trainingPrecRecallTradeoff,"0.5").toDouble)
         costAug.features.weights = weights
 
         val amrdata1 = AMRTrainingData(training(i))
@@ -133,7 +133,14 @@ class TrainObj(val options : Map[Symbol, String]) extends edu.cmu.lti.nlp.amr.Tr
         val file = new java.io.PrintWriter(new java.io.File(devDecode), "UTF-8")
         for((block, i) <- Corpus.splitOnNewline(fromFile(dev+".aligned.no_opN").getLines).zipWithIndex) {
             val inputGraph = AMRTrainingData(block).toInputGraph
-            val stage2 = GraphDecoder.Decoder(options)
+            val stage2Alg_Save = options('stage2Decoder)
+            val stage2 = if (stage2Alg_Save == "Alg1") {
+                    options('stage2Decoder) = "Alg1a"
+                    GraphDecoder.Decoder(options)
+                } else {
+                    GraphDecoder.Decoder(options)
+                }
+            options('stage2Decoder) = stage2Alg_Save
             stage2.features.weights = weights
             val decoderResult = stage2.decode(new Input(inputGraph, tokenized(i).split(" "), dependencies(i)))
             file.println(decoderResult.graph.prettyString(detail=1, pretty=true) + '\n')
