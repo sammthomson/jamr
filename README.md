@@ -10,7 +10,7 @@ Building
 JAMR depends on
 
  * [Scala](http://www.scala-lang.org),
- * the [Illinois NER system](http://cogcomp.cs.illinois.edu/page/download_view/NETagger),
+ * the [Illinois NER system](http://cogcomp.cs.illinois.edu/page/download_view/NETagger) (should also work with newer versions),
  * the tokenization scripts in [cdec](https://github.com/redpony/cdec) (does not require compiling cdec),
  * [WordNet](http://wordnetcode.princeton.edu/3.0/WordNet-3.0.tar.gz) (for the aligner).
 
@@ -22,10 +22,6 @@ add them to ~/.bashrc to set them permanently):
 
     . scripts/config.sh
 
-Install these dependencies, and then change the environment variables in
-`scripts/config.sh` to point at their executables.
-Source `. ./scripts/config.sh`, so that other bash scripts have access to these envvars (JAMR has only been tested with the `bash` shell).
- 
 Run `./compile` to build an uberjar, which will be output to
     `target/scala-{scala_version}/jamr-assembly-{jamr_version}.jar`
 (If you get out of memory errors during this step, you may need to edit the Java memory options
