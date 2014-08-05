@@ -1,5 +1,7 @@
 #!/bin/bash
 
 for split in train dev test; do
-    cat "${DATA_DIR}/amr-release-proxy.${split}.aligned" | sed 's/:op[^ ]*/:op/g' > "${DATA_DIR}/amr-release-proxy.${split}.aligned.no_opN"
+    cat "${DATA_DIR}/amr-release-proxy.${split}.aligned" \
+        | sed 's/:op[^ ]*/:op/g' \
+        > "${DATA_DIR}/amr-release-proxy.${split}.aligned.no_opN"
 done
