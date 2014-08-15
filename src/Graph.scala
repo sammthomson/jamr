@@ -162,7 +162,7 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
         }
     }
 
-    def addSpan(sentence: Array[String], start: Int, end: Int, amrStr: String) { // This function is used by the ConceptInvoker
+    def addSpan(sentence: Array[String], start: Int, end: Int, amrStr: String): (List[(String, String, String)], Span) = { // This function is used by the ConceptInvoker
         // This code sets up relations for each node but not topologicalOrdering or variableRelations
         val graphFrag = Graph.parse(amrStr)
         val graphFrag2 = Graph.parse(amrStr)
@@ -193,7 +193,12 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
         }
         logger(2, "nodeIds = "+nodeIds.reverse)
         logger(2, "concepts = "+nodeIds.reverse.map(x => getNodeById(x).concept))
-        spans += Span(start, end, nodeIds, sentence.slice(start, end).mkString(" "), nodes2.reverse.apply(0), coRef = false)
+        val span = Span(start, end, nodeIds, sentence.slice(start, end).mkString(" "), nodes2.reverse.apply(0), coRef = false)
+        spans += span
+
+        var edges = List[(String, String, String)]()
+        doRecursive(srcNode => edges = srcNode.relations.map({ case (relType, dest) => (srcNode.id, relType, dest.id) }) ::: edges, graphFrag.root)
+        return (edges, span)
     }
 
     def addSpan(start: Int, end: Int, nodeIds: List[String], coRef: Boolean, sentence: Array[String]) {
@@ -205,6 +210,18 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
         spans += span
         for (id <- span.nodeIds) {
             getNodeById(id).addSpan(spans.size-1, span.coRef)
+        }
+    }
+
+    def addNewSpan(span: Span) {
+        // adds nodes to graph and correctly sets node.spans (used in JointDecoder)
+        // assumes node ids are set to unique ids
+        spans += span
+        for (id <- span.nodeIds) {
+            val node = getNodeById(node)
+            getNodeById(id) = node
+            node.spans.clear()
+            node.addSpan(spans.size-1, span.coRef)
         }
     }
 

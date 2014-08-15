@@ -1,36 +1,22 @@
 package edu.cmu.lti.nlp.amr
-import edu.cmu.lti.nlp.amr._
 
-import scala.util.matching.Regex
-import scala.collection.mutable.{Map, Set, ArrayBuffer}
+import scala.collection.mutable.Map
 
 package object JointDecoder {
-
-    def Decoder(options: Map[Symbol, String], oracle: Boolean = false) : JointDecoder.Decoder = {
-
-        val stage1Features = options.getOrElse('stage1Features,"length,count").split(",").toList
-        if (!options.contains('stage1ConceptTable)) {
-            System.err.println("Error: No concept table specified"); sys.exit(1)
-        }
-        val conceptTable = Source.fromFile(options('stage1ConceptTable)).getLines.map(x => new ConceptInvoke.PhraseConceptPair(x)).toArray
-
-        if (!options.contains('stage2Labelset)) {
-            System.err.println("Error: No labelset file specified"); sys.exit(1)
-        }
-
-        val stage2Labelset: Array[(String, Int)] = GraphDecoder.getLabelset(options)
-        val stage2Features = GraphDecoder.getFeatures(options)
-
-        val decoder: Decoder = if (oracle) {
-            new Oracle(stage1Features, conceptTable, stage2Features, stage2Labelset)
-        } else {
-            options('jointDecoder) match {
-//                case "ILP" => new ILP(stage1Features, conceptTable, stage2Features, stage2Labelset)
-                case x => { System.err.println("Error: unknown joint decoder " + x); sys.exit(1) }
-            }
-        }
-
-        return decoder
+  def Decoder(options: Map[Symbol, String], oracle: Boolean = false) : JointDecoder.Decoder = {
+    if (!options.contains('stage1ConceptTable)) throw new IllegalArgumentException("Error: No concept table specified")
+    if (!options.contains('stage2Labelset)) throw new IllegalArgumentException("Error: No labelset file specified")
+    val stage1Features = options.getOrElse('stage1Features,"length,count").split(",").toList
+    val conceptTable = Source.fromFile(options('stage1ConceptTable)).getLines().map(new ConceptInvoke.PhraseConceptPair(_)).toArray
+    val stage2Labelset: Array[(String, Int)] = GraphDecoder.getLabelset(options)
+    val stage2Features = GraphDecoder.getFeatures(options)
+    if (oracle) {
+      new Oracle(stage1Features, conceptTable, stage2Features, stage2Labelset)
+    } else {
+      options('jointDecoder) match {
+        case "ILP" => new IlpDecoder(stage1Features, conceptTable, stage2Features, stage2Labelset)
+        case x => throw new IllegalArgumentException("Error: unknown joint decoder " + x)
+      }
     }
+  }
 }
-

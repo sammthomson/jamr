@@ -1,10 +1,6 @@
 package edu.cmu.lti.nlp.amr.JointDecoder
-import edu.cmu.lti.nlp.amr._
 import edu.cmu.lti.nlp.amr.FastFeatureVector._
-
-import scala.collection.mutable.Map
-import scala.collection.mutable.Set
-import scala.collection.mutable.ArrayBuffer
+import edu.cmu.lti.nlp.amr._
 
 abstract class Decoder {
     val stage1Features : ConceptInvoke.Features
@@ -13,4 +9,3 @@ abstract class Decoder {
 
     def decode(i: Input) : DecoderResult
 }
-
