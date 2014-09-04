@@ -1,167 +1,168 @@
-package JointDecoder
+package edu.cmu.lti.nlp.amr.JointDecoder
 
+import edu.cmu.lti.nlp.amr.graph.Edge
+import edu.cmu.lti.nlp.amr.graph.Edge._
+import edu.cmu.lti.nlp.amr.ilp.Ops._
+import edu.cmu.lti.nlp.amr.ilp._
+import edu.cmu.lti.nlp.amr.logger
 import net.sf.javailp
 import net.sf.javailp.Constraint
-import edu.cmu.lti.nlp.amr.ilp._
-import edu.cmu.lti.nlp.amr.util.Weighted
 
-import scala.collection.Map
+import scala.collection.immutable.IndexedSeq
 
 
 case class Node(id: String)
-
+case class Labeled[T](x: T, label: String)
+object Labeled {
+  implicit def unwrap[T](labeled: Labeled[T]): T = labeled.x
+}
 
 class JamrIlpSolver(val ilpSolver: Solver) {
 
-  def solve(nodeWeights: Array[Double],
+  def solve(nodeWeights: Seq[Double],
             edgeWeights: Array[Array[Array[(String, Double)]]],
-            exclusionsByTokenId: Map[Int, List[Int]],
-            mutuallyRequiredNodesAndEdges: List[(List[Int], List[(Int, Int, String)])]) = {
-    val nodes = graph.nodes.toSeq
-    val dummyRoot = Node("root") % 0
-    val dummyEdges = nodes.map(n => n -> (dummyRoot ~> n % 0)).toMap
-    val edges = graph.edges.toSeq ++ dummyEdges.values
-
-    /* Variables */
-    val nodeVars = nodes.map(n => n -> BoolVar("n%s".format(n.id))).toMap
-    val edgeVars = edges.map(e => e -> BoolVar("n%s~>n%s".format(e.src.id, e.dest.id))).toMap
-
-    /* Constraints */
-    val simpleGraphConstraints = getSimpleGraphConstraints(graph, dummyEdges, nodeVars, edgeVars)
-    val (flowVars, flowConstraints) = getSingleCommodityFlowVarsAndConstraints(graph, dummyEdges, nodeVars, edgeVars)
-
-    val variables = nodeVars.values ++ edgeVars.values ++ flowVars
-//    val asymmConstraints = asymmetryConstraints(dummyEdges, nodeVars, edgeVars)
-    val constraints = simpleGraphConstraints ++ flowConstraints  // ++ asymmConstraints
-    /* Objective */
-    val objective = {
-      val nodeObjTerms = nodeVars collect { case (node, nodeVar) if node.weight != 0.0 => nodeVar * node.weight }
-      val edgeObjTerms = edgeVars collect { case (edge, edgeVar) if edge.weight != 0.0 => edgeVar * edge.weight }
-      Maximize((nodeObjTerms.toSeq ++ edgeObjTerms).reduce(plus))
-    }
-    val problem = Problem(variables, objective, constraints)
-    // solve it
-    val result = ilpSolver.solve(problem)
-    val solnNodes = {
-      nodes.filter(n => result.getBoolean(nodeVars(n)))
-    }
-    val solnEdges = edges.filter(e => e.src != dummyRoot && result.getBoolean(edgeVars(e)))
-    SparseWeightedGraph(solnNodes, solnEdges)
-  }
-
-  def getSimpleGraphConstraints(graph: G,
-                                dummyEdges: Map[N, Weighted[Edge[Weighted[Node]]]],
-                                nodeVars: Map[N, BoolVar],
-                                edgeVars: Map[Weighted[Edge[Weighted[Node]]], BoolVar]): Seq[Constraint] = {
-    val nodes = nodeVars.keys.toSeq
-    // An edge may only be included if both its endpoints are included
-    val edgeLeEndsConstraints = {
-      val edgeLeSrcConstraints =
-        for ((edge, edgeVar) <- edgeVars;
-             srcNodeVar <- nodeVars.get(edge.src)) yield {  // nodeVars does not include dummy root
-          srcNodeVar minus edgeVar gteq 0
-        }
-      val edgeLeDestConstraints =
-        for ((edge, edgeVar) <- edgeVars;
-             destNodeVar <- nodeVars.get(edge.dest)) yield {
-          destNodeVar minus edgeVar gteq 0
-        }
-      edgeLeSrcConstraints ++ edgeLeDestConstraints
-    }
-    // at most one direction can be included
-    val simpleConstraints =
-      for (src <- nodes;
-           dest <- nodes;
-           fwdEdge <- graph.edge(src, dest).map(edgeVars);
-           bkwdEdge <- graph.edge(dest, src).map(edgeVars)) yield {
-        fwdEdge plus bkwdEdge lteq 1
-      }
-    // the root may only have one child
-    val singleRootConstraint = dummyEdges.values.map(edgeVars(_) * 1).reduce(plus) lteq 1
-    edgeLeEndsConstraints.toSeq ++ simpleConstraints :+ singleRootConstraint
-  }
-
-  @deprecated("slower than without")
-  def getAsymmetryConstraints(dummyEdges: Map[N, Weighted[Edge[Weighted[Node]]]],
-                              nodeVars: Map[N, BoolVar],
-                              edgeVars: Map[Weighted[Edge[Weighted[Node]]], BoolVar]): Seq[Constraint] = {
-    val nodes = nodeVars.keys.toSeq
-    for ((u, i) <- nodes.zipWithIndex;
-         v <- nodes.drop(i + 1)) yield {
-      nodeVars(u) plus edgeVars(dummyEdges(v)) lteq 1
-    }
-  }
-
-  def getSingleCommodityFlowVarsAndConstraints(graph: G,
-                                               dummyEdges: Map[N, Weighted[Edge[Weighted[Node]]]],
-                                               nodeVars: Map[N, BoolVar],
-                                               edgeVars: Map[Weighted[Edge[N]], BoolVar]): (Seq[IntVar], Seq[Constraint]) = {
-    val nodes = nodeVars.keys.toSeq
-    val edges = edgeVars.keys.toSeq
-    // single-commodity flow variables
-    val flowVars: Map[Weighted[Edge[N]], IntVar] = edges.map(e => e -> IntVar(s"flow(${edgeVars(e)})")).toMap
-    val flowConstraints: Seq[Constraint] = {
-      // The root must send out 1 unit of flow for each node present
-      val rootFlowConstraint = {
-        dummyEdges.values.map(flowVars(_) * 1).reduce(plus) minus nodeVars.values.map(_ * 1).reduce(plus) equiv 0
-      }
-      // Flow may only be sent over an edge if the edge is included in the solution
-      val flowLeEdgeConstraints = edges.map(e => edgeVars(e) * nodes.size minus flowVars(e) gteq 0)
-      // TODO: might be better to use gurobi's explicit mechanism for upper/lower bounds on IntVars
-      val flowGeZeroConstraints = flowVars.values.map(_ gteq 0).toSeq
-      // Each non-root node must consume exactly one unit of flow, if it is included in the solution
-      val consumeOneFlowConstraints = nodes.map { n =>
-        val incoming = (dummyEdges(n) :: graph.incomingEdges(n).toList).map(flowVars(_) * 1)
-        val outgoing = graph.outgoingEdges(n).toList.map(flowVars(_) * -1)
-        (incoming ++ outgoing).reduce(plus) minus nodeVars(n) equiv 0
-      }
-      flowGeZeroConstraints ++ flowLeEdgeConstraints ++ consumeOneFlowConstraints :+ rootFlowConstraint
-    }
-    (flowVars.values.toSeq, flowConstraints)
-  }
-
-  @deprecated("slower than single-commodity")
-  def getMultiCommodityFlowVarsAndConstraints(graph: G,
-                                              dummyEdges: Map[N, Weighted[Edge[Weighted[Node]]]],
-                                              nodeVars: Map[N, BoolVar],
-                                              edgeVars: Map[Weighted[Edge[N]], BoolVar]): (Seq[BoolVar], Seq[Constraint]) = {
-    val nodes = nodeVars.keys.toSeq
-    val edges = edgeVars.keys.toSeq
-    // multi-commodity flow variables
-    val flowVars = nodes.map(n => n -> edges.map(e => e -> BoolVar(s"flow_${n.id}(${edgeVars(e)})")).toMap).toMap
-    val flowConstraints = {
-      // The root must send out one unit of flow to each node that is present
-      val rootFlowConstraints = nodes map { flowType =>
-        dummyEdges.values.map(e => flowVars(flowType)(e) * 1).reduce(plus) minus nodeVars(flowType) equiv 0
-      }
-      // Flow may only be sent over an edge if the edge is included in the solution
-      val flowLeEdgeConstraints = nodes flatMap { flowType => edges map { e =>
-        edgeVars(e) minus flowVars(flowType)(e) gteq 0
-      } }
-      // Each non-root node present must consume 1 unit of its own flow, and be balanced for other flows
-      val flowBalanceConstraints = nodes flatMap { flowType =>
-        val flows = flowVars(flowType)
-        nodes map { n =>
-          val incoming = (dummyEdges(n) :: graph.incomingEdges(n).toList).map(flows(_) * 1)
-          val outgoing = graph.outgoingEdges(n).map(flows(_) * -1)
-          if (flowType == n) {
-            (incoming ++ outgoing).reduce(plus) minus nodeVars(n) equiv 0
-          } else {
-            (incoming ++ outgoing).reduce(plus) equiv 0
+            exclusionsByTokenId: collection.Map[Int, List[Int]],
+            mutuallyRequiredNodesAndEdges: List[(List[Int], List[(Int, Int, String)])],
+            determinismByLabel: collection.Map[String, Int]): (IndexedSeq[Node], Seq[Labeled[Edge[Node]]]) = {
+    val realNodes: IndexedSeq[Node] = (0 until nodeWeights.size).map(i => Node(i.toString))
+    val dummyRoot = Node("root")
+    val dummyEdges: IndexedSeq[Labeled[Edge[Node]]] = realNodes.map(n => Labeled(dummyRoot ~> n, "rootSelector"))
+    val realEdges: Array[Array[Array[Labeled[Edge[Node]]]]] =
+      edgeWeights.zip(realNodes).map { case (srcWeights, src) =>
+        srcWeights.zip(realNodes).map { case (destWeights, dest) =>
+          destWeights.map { case (label, weight) =>
+            Labeled(Edge(src, dest), label)
           }
         }
       }
-      flowLeEdgeConstraints ++ flowBalanceConstraints ++ rootFlowConstraints
+//    val labels: Map[String, Int] = edgeWeights.head.head.map(_._1).zipWithIndex.toMap
+
+    /* Variables */
+    val nodeVars = realNodes.map(n => BoolVar("n%s".format(n.id))).toSeq
+    val realEdgeVars = realEdges.map(_.map(_.map(toBoolVar)))
+    val dummyEdgeVars = dummyEdges map toBoolVar
+    /* Constraints */
+    val simpleGraphConstraints = getSimpleGraphConstraints(nodeVars, realEdgeVars, dummyEdgeVars)
+    val (flowVars, flowConstraints) = getSingleCommodityFlowVarsAndConstraints(nodeVars, realEdgeVars, dummyEdgeVars)
+    val determinismConstraints = getDeterminismConstraints(nodeVars, realEdgeVars, determinismByLabel) //, labels)
+    val exclusionConstraints = getExclusionConstraints(nodeVars, exclusionsByTokenId)
+    // TODO: mutuallyRequired constraints
+    val variables = nodeVars ++ realEdgeVars.toSeq.flatten.flatten.map(_.x) ++ dummyEdgeVars.map(_.x) ++ flowVars
+    val constraints: Seq[Constraint] = simpleGraphConstraints ++ flowConstraints ++ determinismConstraints ++ exclusionConstraints
+    /* Objective */
+    val objective: Objective = {
+      val nodeObjTerms = nodeVars.zip(nodeWeights) collect { case (nodeVar, weight) if weight != 0.0 => nodeVar * weight }
+      val edgeObjTerms: Seq[Linear] = realEdgeVars.toSeq.flatten.flatten.zip(edgeWeights.toSeq.flatten.flatten) collect {
+        case (edgeVar, (_, weight: Double)) if weight != 0.0 => edgeVar.x * weight
+      }
+      Maximize((nodeObjTerms.toSeq ++ edgeObjTerms).reduce(plus))
     }
-    (flowVars.values.flatMap(_.values).toSeq, flowConstraints)
+    val problem = Problem(variables, objective, constraints)
+    logger(1, s"problem: $problem")
+    // solve it
+    val result = ilpSolver.solve(problem)
+    logger(1, s"result: $result")
+    val solnNodes = {
+      realNodes.zip(nodeVars).collect({ case (n, nodeVar) if result.getBoolean(nodeVar) => n })
+    }
+    val solnEdges = (realEdges.toSeq.flatten.flatten zip realEdgeVars.toSeq.flatten.flatten).collect({
+      case (e, v) if e.src != dummyRoot && result.getBoolean(v.x) => e
+    })
+    (solnNodes, solnEdges)
+  }
+
+  def getExclusionConstraints(nodeVars: Seq[BoolVar], exclusionsByTokenIdx: collection.Map[Int, List[Int]]) = {
+    for ((tokenIdx, nodeIdxs) <- exclusionsByTokenIdx) yield {
+      nodeIdxs.map(nodeVars(_) * 1).reduce(plus) lteq 1
+    }
+  }
+
+  def getMutuallyRequiredConstraints(realNodeVars: Seq[BoolVar],
+                                     realEdgeVars: Array[Array[Array[BoolVar]]],
+                                     mutuallyRequiredNodesAndEdges: List[(List[Int], List[(Int, Int, String)])]) = {
+    // TODO
+  }
+
+  protected def toBoolVar(edge: Labeled[Edge[Node]]): Labeled[BoolVar] = {
+    Labeled(BoolVar("n%s~%s~>n%s".format(edge.src.id, edge.label, edge.dest.id)), edge.label)
+  }
+
+  def getSimpleGraphConstraints(realNodeVars: Seq[BoolVar],
+                                realEdgeVars: Array[Array[Array[Labeled[BoolVar]]]],
+                                dummyEdgeVars: Seq[Labeled[BoolVar]]): Seq[Constraint] = {
+    // An edge may only be included if both its endpoints are included
+    val edgeLeEndsConstraints = {
+      val realEdgeLeEndsConstraints = realEdgeVars.zipWithIndex flatMap { case (row, srcIdx) =>
+        row.zipWithIndex flatMap { case (cell, destIdx) =>
+          cell flatMap { edgeVar =>
+            Seq(
+              realNodeVars(srcIdx) minus edgeVar.x gteq 0,
+              realNodeVars(destIdx) minus edgeVar.x gteq 0
+            )
+          }
+        }
+      }
+      val dummyEdgeLeEndsConstraints = dummyEdgeVars.zipWithIndex map { case (edgeVar, destIdx) =>
+        realNodeVars(destIdx) minus edgeVar.x gteq 0
+      }
+      realEdgeLeEndsConstraints.toSeq ++ dummyEdgeLeEndsConstraints
+    }
+    // at most one direction can be included
+    val simpleConstraints =
+      for (srcIdx <- 0 until realNodeVars.size;
+           destIdx <- 0 until realNodeVars.size) yield {
+        val forwardEdges = realEdgeVars(srcIdx)(destIdx).map(_ * 1).reduce(plus)
+        val backwardEdges = realEdgeVars(destIdx)(srcIdx).map(_ * 1).reduce(plus)
+        forwardEdges plus backwardEdges lteq 1
+      }
+    // the root may only have one child
+    val singleRootConstraint = dummyEdgeVars.map(_ * 1).reduce(plus) lteq 1
+    edgeLeEndsConstraints.toSeq ++ simpleConstraints :+ singleRootConstraint
+  }
+
+  def getDeterminismConstraints(nodeVars: Seq[BoolVar],
+                                realEdgeVars: Array[Array[Array[Labeled[BoolVar]]]],
+                                determinismByLabel: collection.Map[String, Int]/*,
+                                labels: Map[String, Int]*/): Seq[Constraint] = {
+    for (outgoingEdges <- realEdgeVars;
+         (label, maxOutEdges) <- determinismByLabel/*;
+         labelIdx <- labels.get(label)*/) yield {
+      outgoingEdges.toSeq.flatten.collect({ case Labeled(edgeVar, `label`) => edgeVar * 1 }).reduce(plus) lteq maxOutEdges
+    }
+  }
+
+  def getSingleCommodityFlowVarsAndConstraints(nodeVars: Seq[BoolVar],
+                                               realEdgeVars: Array[Array[Array[Labeled[BoolVar]]]],
+                                               dummyEdgeVars: Seq[Labeled[BoolVar]]): (Seq[IntVar], Seq[Constraint]) = {
+    // single-commodity flow variables
+    val realFlowVars = realEdgeVars.map(_.map(_.map(e => IntVar(s"flow(${e.x})"))))
+    val dummyFlowVars = dummyEdgeVars.map(e => IntVar(s"flow(${e.x})"))
+    val flowConstraints: Seq[Constraint] = {
+      // The root must send out 1 unit of flow for each node present
+      val rootFlowConstraint = dummyFlowVars.map(_ * 1).reduce(plus) minus nodeVars.map(_ * 1).reduce(plus) equiv 0
+      // Flow may only be sent over an edge if the edge is included in the solution
+      val flowLeEdgeConstraints = (for (srcIdx <- 0 until nodeVars.size;
+           destIdx <- 0 until nodeVars.size;
+           (edgeVar, flowVar) <- realEdgeVars(srcIdx)(destIdx) zip realFlowVars(srcIdx)(destIdx)) yield {
+        edgeVar * nodeVars.size minus flowVar gteq 0
+      }) ++ (for ((edgeVar, flowVar) <- dummyEdgeVars zip dummyFlowVars) yield {
+        edgeVar * nodeVars.size minus flowVar gteq 0
+      })
+      // TODO: might be better to use gurobi's explicit mechanism for upper/lower bounds on IntVars
+      val flowGeZeroConstraints = realFlowVars.flatMap(_.flatMap(_.map(_ gteq 0))).toSeq ++ dummyFlowVars.map(_ gteq 0)
+      // Each non-root node must consume exactly one unit of flow, if it is included in the solution
+      val consumeOneFlowConstraints = nodeVars.zipWithIndex.map { case (nodeVar, i) =>
+        val incoming = (dummyFlowVars(i) :: (0 until nodeVars.size).map(srcIdx => realFlowVars(srcIdx)(i)).toList.flatten).map(_ * 1)
+        val outgoing = (0 until nodeVars.size).map(destIdx => realFlowVars(i)(destIdx)).flatten.map(_ * -1)
+        (incoming ++ outgoing).reduce(plus) minus nodeVar equiv 0
+      }
+      flowGeZeroConstraints ++ flowLeEdgeConstraints ++ consumeOneFlowConstraints :+ rootFlowConstraint
+    }
+    (realFlowVars.toSeq.flatten.flatten, flowConstraints)
   }
 }
 
 object JamrIlpSolver {
-  private type N = Weighted[Node]
-  private type E = Weighted[Edge[N]]
-  private type G = WeightedGraph[N]
-
   lazy val gurobi = new JamrIlpSolver(Solver(new javailp.SolverFactoryGurobi))
   lazy val cplex = new JamrIlpSolver(Solver(new javailp.SolverFactoryCPLEX))
 }

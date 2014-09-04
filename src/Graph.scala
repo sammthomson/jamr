@@ -213,12 +213,12 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
         }
     }
 
-    def addNewSpan(span: Span) {
-        // adds nodes to graph and correctly sets node.spans (used in JointDecoder)
+    def addNewSpan(span: Span, fullGraph: Graph) {
+        // adds nodes from fullGraph to this graph and correctly sets node.spans (used in JointDecoder)
         // assumes node ids are set to unique ids
         spans += span
         for (id <- span.nodeIds) {
-            val node = getNodeById(node)
+            val node = fullGraph.getNodeById(id)
             getNodeById(id) = node
             node.spans.clear()
             node.addSpan(spans.size-1, span.coRef)
@@ -545,6 +545,9 @@ object Graph {
 
     //def empty() : Graph = { val g = parse("(n / none)"); g.getNodeById.clear; g.getNodeByName.clear; return g }
     //def amrEmpty() : Graph = { parse("(a / amr-empty)") }
-    def empty() : Graph = { val g = parse("(a / amr-empty)"); g.loadSpans("0-0|0", Array()); return g }
+    def empty() : Graph = {
+      val g = parse("(a / amr-empty)")
+      g.loadSpans("0-0|0", Array()) // TODO: delete me?
+      return g
+    }
 }
-

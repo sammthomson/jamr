@@ -1,10 +1,9 @@
 package edu.cmu.lti.nlp.amr.GraphDecoder
-import edu.cmu.lti.nlp.amr._  
 import edu.cmu.lti.nlp.amr.FastFeatureVector._
+import edu.cmu.lti.nlp.amr._
 
-import scala.util.matching.Regex
-import scala.collection.mutable.{Map, Set, ArrayBuffer}
 import scala.collection.immutable
+import scala.collection.mutable.Map
 
 /**************************** Feature Functions *****************************/
 
@@ -23,7 +22,9 @@ class Features(var featureNames: List[String], labelSet: Array[String]) {
     def input: Input = inputSave
     def input_= (i: Input) {
         inputSave = i
-        graph = i.graph.get
+        if (i.graph.isDefined){
+            graph = i.graph.get
+        }
         sentence = i.sentence
         dependencies = i.dependencies
         //pos = i.pos

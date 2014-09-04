@@ -1,4 +1,4 @@
-import AssemblyKeys._
+
 
 assemblySettings
 
@@ -12,13 +12,14 @@ scalaVersion := "2.10.3"
 
 libraryDependencies ++= Seq(
   "edu.stanford.nlp" % "stanford-corenlp" % "3.3.1",
-  "edu.stanford.nlp" % "stanford-corenlp" % "3.3.1" classifier "models"
+  "edu.stanford.nlp" % "stanford-corenlp" % "3.3.1" classifier "models",
+  "org.scalatest" %% "scalatest" % "2.2.2"
 //  "org.scala-lang" % "scala-swing" % "2.10.3"
 )
 
-//scalaSource in compile := (baseDirectory in compile).value  / "src"
-
 scalaSource in Compile := baseDirectory.value / "src"
+
+scalaSource in Test := baseDirectory.value / "test"
 
 // Running JAMR via sbt:
 

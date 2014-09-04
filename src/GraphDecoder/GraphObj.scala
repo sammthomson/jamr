@@ -1,21 +1,9 @@
 package edu.cmu.lti.nlp.amr.GraphDecoder
-import edu.cmu.lti.nlp.amr._
 import edu.cmu.lti.nlp.amr.FastFeatureVector._
+import edu.cmu.lti.nlp.amr._
 
-import java.lang.Math.abs
-import java.lang.Math.log
-import java.lang.Math.exp
-import java.lang.Math.random
-import java.lang.Math.floor
-import java.lang.Math.min
-import java.lang.Math.max
-import scala.io.Source
-import scala.util.matching.Regex
-import scala.collection.mutable.Map
+import scala.Double.{NegativeInfinity => minusInfty}
 import scala.collection.mutable.Set
-import scala.collection.mutable.ArrayBuffer
-import scala.collection.mutable.PriorityQueue
-import Double.{NegativeInfinity => minusInfty}
 
 case class GraphObj(graph: Graph,
                     nodes: Array[Node], // usually 'nodes' is graph.nodes.filter(_.name != None).toArray
@@ -76,6 +64,7 @@ case class GraphObj(graph: Graph,
 
     private def computeWeightMatrix : Array[Array[Array[(String, Double)]]] = {
         val edgeWeights : Array[Array[Array[(String, Double)]]] = nodes.map(x => Array.fill(0)(Array.fill(0)("",0.0)))
+        logger(1, features.weights)
         for (i <- 0 until nodes.size) {
             edgeWeights(i) = nodes.map(x => Array.fill(0)(("",0.0)))
             for (j <- 0 until nodes.size) {
@@ -84,6 +73,7 @@ case class GraphObj(graph: Graph,
                 } else {
                     edgeWeights(i)(j) = Array.fill(features.weights.labelset.size)(("", 0.0))
                     val feats = features.localFeatures(nodes(i), nodes(j))
+                    logger(1, s"i: $i, j: $j, feats: $feats")
                     features.weights.iterateOverLabels2(feats,
                         x => edgeWeights(i)(j)(x.labelIndex) = (features.weights.labelset(x.labelIndex), x.value))
                 }
@@ -98,7 +88,7 @@ case class GraphObj(graph: Graph,
         logger(1, "setArray = " + setArray.toList)
     }
 
-    logger(1, "Adding edges already there")
+//    logger(1, "Adding the edges that are already there")
     val nodeIds : Array[String] = nodes.map(_.id).toArray
     for { (node1, index1) <- nodes.zipWithIndex
           (label, node2) <- node1.relations } {
