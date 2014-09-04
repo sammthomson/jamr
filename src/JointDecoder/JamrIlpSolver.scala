@@ -46,9 +46,13 @@ class JamrIlpSolver(val ilpSolver: Solver) {
     val (flowVars, flowConstraints) = getSingleCommodityFlowVarsAndConstraints(nodeVars, realEdgeVars, dummyEdgeVars)
     val determinismConstraints = getDeterminismConstraints(nodeVars, realEdgeVars, determinismByLabel) //, labels)
     val exclusionConstraints = getExclusionConstraints(nodeVars, exclusionsByTokenId)
-    // TODO: mutuallyRequired constraints
+    val mutuallyRequiredConstraints = getMutuallyRequiredConstraints(nodeVars, realEdgeVars, mutuallyRequiredNodesAndEdges)
     val variables = nodeVars ++ realEdgeVars.toSeq.flatten.flatten.map(_.x) ++ dummyEdgeVars.map(_.x) ++ flowVars
-    val constraints: Seq[Constraint] = simpleGraphConstraints ++ flowConstraints ++ determinismConstraints ++ exclusionConstraints
+    val constraints: Seq[Constraint] = simpleGraphConstraints ++
+      flowConstraints ++
+      determinismConstraints ++
+      exclusionConstraints ++
+      mutuallyRequiredConstraints
     /* Objective */
     val objective: Objective = {
       val nodeObjTerms = nodeVars.zip(nodeWeights) collect { case (nodeVar, weight) if weight != 0.0 => nodeVar * weight }
@@ -78,9 +82,16 @@ class JamrIlpSolver(val ilpSolver: Solver) {
   }
 
   def getMutuallyRequiredConstraints(realNodeVars: Seq[BoolVar],
-                                     realEdgeVars: Array[Array[Array[BoolVar]]],
-                                     mutuallyRequiredNodesAndEdges: List[(List[Int], List[(Int, Int, String)])]) = {
-    // TODO
+                                     realEdgeVars: Array[Array[Array[Labeled[BoolVar]]]],
+                                     mutuallyRequiredNodesAndEdges: List[(List[Int], List[(Int, Int, String)])]): Seq[Constraint] = {
+    val constraints = for ((nodeIds, edges) <- mutuallyRequiredNodesAndEdges) yield {
+      val equalVars: List[BoolVar] = nodeIds.map(realNodeVars) ++ edges.flatMap({
+        case (srcId, destId, label) => realEdgeVars(srcId)(destId).collect({ case Labeled(e, `label`) => e })
+      })
+      val representative = equalVars.head
+      equalVars.map(v => v minus representative equiv 0)
+    }
+    constraints.flatten
   }
 
   protected def toBoolVar(edge: Labeled[Edge[Node]]): Labeled[BoolVar] = {

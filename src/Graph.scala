@@ -9,10 +9,10 @@ import scala.util.parsing.combinator._
 
 case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[String, Node], getNodeByName: Map[String, Node]) {
 
-    def duplicate : Graph = {
+    def duplicate: Graph = {
         // Makes a copy of the graph
         // Assumes that getNodeById exists and is properly set up (for 'nodes' call)
-        val getNodeById2 : Map[String, Node] = Map()
+        val getNodeById2: Map[String, Node] = Map()
         for (node <- nodes) {
             val Node(id, name, concept, relations, topologicalOrdering, variableRelations, alignment, spans) = node
             getNodeById2(id) = Node(id, name, concept, List(), List(), List(), alignment, spans)
@@ -29,7 +29,7 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
         val root2 = if (getNodeById2.contains(root.id)) {
             getNodeById2(root.id)
         } else {
-            Graph.empty().root  // sometimes the root is not in the spans (if it is from automatically aligned spans, and the root is not in the spans).  So we create a dummy root which will get re-assigned later
+            Graph.empty().root // sometimes the root is not in the spans (if it is from automatically aligned spans, and the root is not in the spans).  So we create a dummy root which will get re-assigned later
         }
         return Graph(root2, spans.clone, getNodeById2, getNodeByName2)
     }
@@ -38,16 +38,17 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
         // Removes all the unaligned nodes from the graph (useful for oracle experiments)
         // WARNING: this can break the topological ordering
         for (node <- nodes) {
-            if (node.spans.size == 0) { // Unaligned
-                logger(1, "clearUnalignedNodes():  removing unaligned node: "+node.name+" / "+node.concept)
+            if (node.spans.size == 0) {
+                // Unaligned
+                logger(1, "clearUnalignedNodes():  removing unaligned node: " + node.name + " / " + node.concept)
                 getNodeById -= node.id
                 if (node.name != None) {
                     getNodeByName -= node.name.get
                 }
             }
         }
-        if (nodes.filter(x => !getNodeById.contains(x.id)).size  > 0) {
-            logger(1, "clearUnalignedNodes() deleting relations to the following nodes: "+nodes.filter(x => !getNodeById.contains(x.id)).toList)
+        if (nodes.filter(x => !getNodeById.contains(x.id)).size > 0) {
+            logger(1, "clearUnalignedNodes() deleting relations to the following nodes: " + nodes.filter(x => !getNodeById.contains(x.id)).toList)
         }
         for (node <- nodes) {
             node.topologicalOrdering = node.topologicalOrdering.filter(x => getNodeById.contains(x._2.id)) // Warning this may break the topological ordering
@@ -56,7 +57,7 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
         }
     }
 
-    def clearEdges() : Graph = {
+    def clearEdges(): Graph = {
         // Initializes the graph from the spans (effectively clearing the edges)
         // Sets relations, but leaves topologicalOrdering and variableRelations blank
         // As a side effect, it re-assigns ids to all the nodes in the graph.  TODO: why did I do it this way???  Couldn't I just keep the ids the same???  Maybe it was so I could simulate what it is like to have ids from stage 1
@@ -66,14 +67,16 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
         getNodeById.clear
         getNodeByName.clear
 
-        def addRec(node: Node) : (Node, List[String]) = {
+        def addRec(node: Node): (Node, List[String]) = {
             var ids = List(currentId.toString)
             //val node2 = Node(node.id, node.name, node.concept, List(), List(), List(), node.alignment, node.spans)
-            val node2 = Node(currentId.toString, node.name, node.concept, List(), List(), List(), node.alignment, node.spans)   // TODO: is this bugfix correct???
+            val node2 = Node(currentId.toString, node.name, node.concept, List(), List(), List(), node.alignment, node.spans) // TODO: is this bugfix correct???
             var relations = List[(String, Node)]()
             getNodeById(currentId.toString) = node2
             node.name match {
-                case Some(name) => { getNodeByName(name) = node2 }
+                case Some(name) => {
+                    getNodeByName(name) = node2
+                }
                 case None => Unit
             }
             currentId += 1
@@ -97,10 +100,10 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
         }
 
         for ((id, node) <- getNodeById) {
-            for { spanIndex <- node.spans
-                  span = spans(spanIndex)
-                  if span.coRef
-                } {
+            for {spanIndex <- node.spans
+                 span = spans(spanIndex)
+                 if span.coRef
+            } {
                 span.nodeIds = span.nodeIds ::: List(id)
             }
         }
@@ -108,44 +111,48 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
     }
 
     def printTriples(detail: Int = 1,
-                     extra: (Node, Node, String) => String = (n1, n2, r) => "",   // Optional string to print after each relation
+                     extra: (Node, Node, String) => String = (n1, n2, r) => "", // Optional string to print after each relation
                      sorted: Boolean = true
-                     ) : String = {
-        def name(node: Node) : String = {
+                    ): String = {
+        def name(node: Node): String = {
             node.name match {
                 case None => ""
                 case Some(n) => n + " / "
             }
         }
 
-        var triples : List[(String, String)] = List()
+        var triples: List[(String, String)] = List()
         val Relation = """:?(.*)""".r
 
-        for { node1 <- nodes
-              (label, node2) <- node1.relations
-              Relation(relation) = label    // label includes the ":" (passed to extra)
-            } {
+        for {node1 <- nodes
+             (label, node2) <- node1.relations
+             Relation(relation) = label // label includes the ":" (passed to extra)
+        } {
             detail match {
-                case 0 => triples = ("(" + node1.concept + ", " + relation + ", " + node2.concept + ")", extra(node1,node2,label)) :: triples
-                case 1 => triples = ( "(" + name(node1) + node1.concept + ", " + relation + ", " + name(node2) + node2.concept + ")", extra(node1,node2,label)) :: triples
-                case 2 => triples = (relation + "(" + node1.concept + ", " + node2.concept + ")", extra(node1,node2,label)) :: triples
-                case 3 => triples = (relation + "(" + name(node1) + node1.concept + ", " + name(node2) + node2.concept + ")", extra(node1,node2,label)) :: triples
-                case _ => triples = ("(" + name(node1) + node1.concept + ", " + name(node2) + node2.concept + ", " + relation + ")", extra(node1,node2,label)) :: triples
+                case 0 => triples = ("(" + node1.concept + ", " + relation + ", " + node2.concept + ")", extra(node1, node2, label)) :: triples
+                case 1 => triples = ("(" + name(node1) + node1.concept + ", " + relation + ", " + name(node2) + node2.concept + ")", extra(node1, node2, label)) :: triples
+                case 2 => triples = (relation + "(" + node1.concept + ", " + node2.concept + ")", extra(node1, node2, label)) :: triples
+                case 3 => triples = (relation + "(" + name(node1) + node1.concept + ", " + name(node2) + node2.concept + ")", extra(node1, node2, label)) :: triples
+                case _ => triples = ("(" + name(node1) + node1.concept + ", " + name(node2) + node2.concept + ", " + relation + ")", extra(node1, node2, label)) :: triples
             }
         }
-        if (sorted) { triples = triples.sorted } else { triples = triples.reverse }
-        return triples.map(x => x._1+x._2).mkString("\n")
+        if (sorted) {
+            triples = triples.sorted
+        } else {
+            triples = triples.reverse
+        }
+        return triples.map(x => x._1 + x._2).mkString("\n")
     }
 
     def loadSpans(spanStr: String, sentence: Array[String]) = {
         assert(spans.size == 0, "This code does not support re-loading the spans")
         //spans.clear
-        val SpanRegex = """([*]?)([0-9]+)-([0-9]+)\|(.*)""".r   // TODO: move to Span
+        val SpanRegex = """([*]?)([0-9]+)-([0-9]+)\|(.*)""".r // TODO: move to Span
         for (spanStr <- spanStr.split(" ")) {
             try {
                 val SpanRegex(corefStr, start, end, nodeStr) = spanStr
                 val nodeIds = nodeStr.split("[+]").toList.sorted
-                val words = SpanLoader.getWords(start.toInt, end.toInt, sentence)   // TODO: use addSpan function
+                val words = SpanLoader.getWords(start.toInt, end.toInt, sentence) // TODO: use addSpan function
                 val amr = SpanLoader.getAmr(nodeIds, this)
                 val coref = corefStr match {
                     case "*" => true
@@ -153,31 +160,33 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
                 }
                 spans += Span(start.toInt, end.toInt, nodeIds, words, amr, coref)
                 for (id <- nodeIds) {
-                    getNodeById(id).addSpan(spans.size-1, coref)
+                    getNodeById(id).addSpan(spans.size - 1, coref)
                 }
             } catch {
                 // TODO: catch malformed input (Regex match error, or toInt err)
-                case e : Throwable => logger(1, "****************** MALFORMED SPAN: "+spanStr)
+                case e: Throwable => logger(1, "****************** MALFORMED SPAN: " + spanStr)
             }
         }
     }
 
-    def addSpan(sentence: Array[String], start: Int, end: Int, amrStr: String): (List[(String, String, String)], Span) = { // This function is used by the ConceptInvoker
+    def addSpan(sentence: Array[String], start: Int, end: Int, amrStr: String): (List[(String, String, String)], Span) = {
+        // This function is used by the ConceptInvoker
         // This code sets up relations for each node but not topologicalOrdering or variableRelations
         val graphFrag = Graph.parse(amrStr)
         val graphFrag2 = Graph.parse(amrStr)
         var currentId = getNodeById.size
-        var nodeIds : List[String] = List()
-        var nodes : List[Node] = List()
-        doRecursive(x => nodes = x :: nodes, graphFrag.root)    // in order traversal
-        var nodes2 : List[Node] = List() // copy of the nodes in the span (goes into span.amr)
-        doRecursive(x => nodes2 = x :: nodes2, graphFrag2.root)    // in order traversal
+        var nodeIds: List[String] = List()
+        var nodes: List[Node] = List()
+        doRecursive(x => nodes = x :: nodes, graphFrag.root) // in order traversal
+        var nodes2: List[Node] = List() // copy of the nodes in the span (goes into span.amr)
+        doRecursive(x => nodes2 = x :: nodes2, graphFrag2.root) // in order traversal
         for ((node, node2) <- nodes.zip(nodes2).reverse) {
             node.id = currentId.toString
             node2.id = node.id
             nodeIds = node.id :: nodeIds
             getNodeById(node.id) = node
-            if (node.concept(0) != '"') {   // concepts always have size > 0 (enforced by GraphParser)
+            if (node.concept(0) != '"') {
+                // concepts always have size > 0 (enforced by GraphParser)
                 val varName = getNextVariableName(node.concept.toLowerCase()(0))
                 getNodeByName(varName) = node
                 node.name = Some(varName)
@@ -191,13 +200,13 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
             node2.spans = ArrayBuffer(spans.size)
             currentId += 1
         }
-        logger(2, "nodeIds = "+nodeIds.reverse)
-        logger(2, "concepts = "+nodeIds.reverse.map(x => getNodeById(x).concept))
+        logger(2, "nodeIds = " + nodeIds.reverse)
+        logger(2, "concepts = " + nodeIds.reverse.map(x => getNodeById(x).concept))
         val span = Span(start, end, nodeIds, sentence.slice(start, end).mkString(" "), nodes2.reverse.apply(0), coRef = false)
         spans += span
 
         var edges = List[(String, String, String)]()
-        doRecursive(srcNode => edges = srcNode.relations.map({ case (relType, dest) => (srcNode.id, relType, dest.id) }) ::: edges, graphFrag.root)
+        doRecursive(srcNode => edges = srcNode.relations.map({ case (relType, dest) => (srcNode.id, relType, dest.id)}) ::: edges, graphFrag.root)
         return (edges, span)
     }
 
@@ -209,19 +218,21 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
     def addSpan(span: Span) {
         spans += span
         for (id <- span.nodeIds) {
-            getNodeById(id).addSpan(spans.size-1, span.coRef)
+            getNodeById(id).addSpan(spans.size - 1, span.coRef)
         }
     }
 
     def addNewSpan(span: Span, fullGraph: Graph) {
         // adds nodes from fullGraph to this graph and correctly sets node.spans (used in JointDecoder)
         // assumes node ids are set to unique ids
+        logger(1, s"span.nodes: ${span.nodeIds.map(nodeId => fullGraph.getNodeById(nodeId).concept)}")
+        logger(1, span.amr.toString())
         spans += span
         for (id <- span.nodeIds) {
             val node = fullGraph.getNodeById(id)
             getNodeById(id) = node
             node.spans.clear()
-            node.addSpan(spans.size-1, span.coRef)
+            node.addSpan(spans.size - 1, span.coRef)
         }
     }
 
@@ -233,7 +244,7 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
         }
         val span = Span(start, end, nodeIds, sentence.slice(start, end).mkString(" "), SpanLoader.getAmr(nodeIds, this), coRef)
         spans(spanIndex) = span
-       for (id <- nodeIds) {
+        for (id <- nodeIds) {
             getNodeById(id).addSpan(spanIndex, coRef)
             //println(getNodeById(id).spans)
         }
@@ -257,32 +268,34 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
         updateSpan(spanIndex, span.start, span.end, span.nodeIds, coRef, sentence)
     }
 
-    def nodes : Iterator[Node] = {
+    def nodes: Iterator[Node] = {
         return getNodeById.valuesIterator
     }
 
-    def nodesByName : Iterator[Node] = {
+    def nodesByName: Iterator[Node] = {
         return getNodeByName.valuesIterator
     }
 
     def doRecursive(f: (Node) => Unit, node: Node = root) {
         f(node)
-        for ((_,child) <- node.topologicalOrdering) {
+        for ((_, child) <- node.topologicalOrdering) {
             doRecursive(f, child)
         }
     }
 
-/* Very cool recursive function TODO: use this one instead
-    def doRecursive(parentMessage: T, node: Node, f: (Node, T) => T, g: List[T] => R ) : R = {
-        val message = f(parentMessage, node)
-        return g(node.topologicalOrdering.map(x => doRecursive(message, x.2, f, g)).toList)
-    }
-*/
+    /* Very cool recursive function TODO: use this one instead
+        def doRecursive(parentMessage: T, node: Node, f: (Node, T) => T, g: List[T] => R ) : R = {
+            val message = f(parentMessage, node)
+            return g(node.topologicalOrdering.map(x => doRecursive(message, x.2, f, g)).toList)
+        }
+    */
 
     def sortRelations() {
         // Sorts the nodes in topological ordering by the label name
         // WARNING: This should be called only after assignOpN
-        doRecursive(x => {x.topologicalOrdering = x.topologicalOrdering.sortBy(_._1)}, root)
+        doRecursive(x => {
+            x.topologicalOrdering = x.topologicalOrdering.sortBy(_._1)
+        }, root)
     }
 
     def makeIds() {
@@ -293,26 +306,29 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
         val oldToNew = makeIds(root)
         for (span <- spans) {
             span.nodeIds = span.nodeIds.map(x => oldToNew(x))
-            doRecursive(x => x.id = oldToNew.getOrElse(x.id, { logger(0, "WARNING: makeIds can't find span Id: "+x.id); x.id }), span.amr)
+            doRecursive(x => x.id = oldToNew.getOrElse(x.id, {
+                logger(0, "WARNING: makeIds can't find span Id: " + x.id);
+                x.id
+            }), span.amr)
         }
     }
 
-    def makeIds(node: Node, id: List[Int] = List(0)) : immutable.Map[String, String] = {
+    def makeIds(node: Node, id: List[Int] = List(0)): immutable.Map[String, String] = {
         // Sets the node.id field for every node in the graph according to the topologicalOrdering
         // For example "0" is the root and "0.1" is the 2nd child of the root
         // Assumes that a topological ordering already exists (node.topologicalOrdering is non-empty)
         val newId = id.mkString(".")
-        var oldIdToNewId : immutable.Map[String, String] = immutable.Map(node.id -> newId)
+        var oldIdToNewId: immutable.Map[String, String] = immutable.Map(node.id -> newId)
         node.id = newId
         getNodeById += (node.id -> node)
-        for (((label,child), i) <- node.topologicalOrdering.zipWithIndex) {
+        for (((label, child), i) <- node.topologicalOrdering.zipWithIndex) {
             oldIdToNewId ++= makeIds(child, id ::: List(i))
         }
         return oldIdToNewId
     }
 
     private def makeVariables(node: Node = root) {
-    // TODO: this can be simplified using getNodeById and 'nodes'
+        // TODO: this can be simplified using getNodeById and 'nodes'
         // Populate the getNodeByName map
         // Assumes a topologicalOrdering exists and node.name is set
         if (node == root) {
@@ -324,25 +340,25 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
                 throw new RuntimeException("duplicate variable name: " + name)
             } else {
                 getNodeByName += (name -> node)
-                for ((_,child) <- node.topologicalOrdering) {
+                for ((_, child) <- node.topologicalOrdering) {
                     makeVariables(child)
                 }
             }
         }
     }
 
-/*    private def makeVariables() {
-        // Populate the getNodeByName map
-        // Assumes getNodeById exists and node.name is set correctly (can be None)
-        
-    } */
+    /*    private def makeVariables() {
+            // Populate the getNodeByName map
+            // Assumes getNodeById exists and node.name is set correctly (can be None)
+
+        } */
 
     def normalizeInverseRelations() {
         // For all nodes, converts all inverse relations in node.relations into forward relations for the corresponding nodes
-        for (node1 <- nodes ) {
-            for { (rel, node2) <- node1.relations
-                  if rel.endsWith("-of")
-                  relation = rel.slice(0,rel.size-3) } {
+        for (node1 <- nodes) {
+            for {(rel, node2) <- node1.relations
+                 if rel.endsWith("-of")
+                 relation = rel.slice(0, rel.size - 3)} {
                 // Add non-inverse relation to node2
                 node2.relations = node2.relations ::: List((relation, node1))
             }
@@ -351,13 +367,17 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
         }
     }
 
-    def inverseRelations : Map[String, List[(String, String)]] = {
+    def inverseRelations: Map[String, List[(String, String)]] = {
         // Returns all the inverse relations as a map: node_id -> List((inverse_relation, node_id))
         // Used by makeTopologicalOrdering to follow inverse relations as well
         val inverse = Map.empty[String, List[(String, String)]]
-        for { node1 <- nodes
-              (rel, node2) <- node1.relations } {
-            val relation = if (rel.endsWith("-of")) { rel.slice(0,rel.size-3) } else { rel+"-of" }
+        for {node1 <- nodes
+             (rel, node2) <- node1.relations} {
+            val relation = if (rel.endsWith("-of")) {
+                rel.slice(0, rel.size - 3)
+            } else {
+                rel + "-of"
+            }
             inverse(node2.id) = (relation, node1.id) :: inverse.getOrElse(node2.id, List())
         }
         return inverse
@@ -374,7 +394,8 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
         node.variableRelations = List[(String, Var)]()
         for ((relation, child) <- relations) {
             // figure out if child is a node, or a variable
-            if (child.name == None && getNodeByName.contains(child.concept) && child.topologicalOrdering.size == 0) { // variables have concepts, but no names
+            if (child.name == None && getNodeByName.contains(child.concept) && child.topologicalOrdering.size == 0) {
+                // variables have concepts, but no names
                 // child is a variable
                 val varName = child.concept
                 val actualNode = getNodeByName(varName)
@@ -398,25 +419,25 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
         //   node.relations is correct for each node
         //   getNodeByName is setup correctly
         //   getNodeById is defined for all nodes
-        // Postcondition: This function populates node.variableRelations and node.topologicalOrdering by 
+        // Postcondition: This function populates node.variableRelations and node.topologicalOrdering by
         // breadth-first-search from the root.
         var queue = Queue[Node](root)
         val visited = Set.empty[String]
         val inverse = inverseRelations
         do {
             val (node, dequeue) = queue.dequeue
-            logger(2, "Node = "+node.id)
+            logger(2, "Node = " + node.id)
             queue = dequeue
             visited += node.id
             node.topologicalOrdering = List()
             node.variableRelations = List()
-            logger(3, "inverse.getOrElse(node.id, List()) = "+inverse.getOrElse(node.id, List()))
+            logger(3, "inverse.getOrElse(node.id, List()) = " + inverse.getOrElse(node.id, List()))
             val relations = node.relations ::: inverse.getOrElse(node.id, List()).map(x => (x._1, getNodeById(x._2)))
             for ((relation, child) <- relations.sortBy(_._1).reverse) {
-                logger(3, "(relation, child) = "+(relation,child.id))
+                logger(3, "(relation, child) = " +(relation, child.id))
                 if (queue.contains(child)) {
                     // this is a variable relation
-                    logger(3, "Adding "+child.id+" as a variable of "+node.id)
+                    logger(3, "Adding " + child.id + " as a variable of " + node.id)
                     //assert(child.name != None, "Attempting to create a variable relation to a node without a variable name")
                     if (child.name != None) {
                         val Some(name) = child.name
@@ -428,26 +449,26 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
                     }
                 } else if (!visited.contains(child.id)) {
                     // this node goes into the topological ordering
-                    logger(3, "Adding "+child.id+" as a child of "+node.id)
+                    logger(3, "Adding " + child.id + " as a child of " + node.id)
                     visited += child.id
                     queue = queue.enqueue(child)
                     node.topologicalOrdering = (relation, child) :: node.topologicalOrdering
                 }
             }
         } while (queue.size != 0)
-        logger(2, "visited = "+visited)
+        logger(2, "visited = " + visited)
         assert(visited.size == nodes.size, "The graph does not span the nodes")
     }
 
-    private def getNextVariableName(c: Char) : String = {
+    private def getNextVariableName(c: Char): String = {
         if (!getNodeByName.contains(c.toString)) {
             c.toString
         } else {
             var i = 2
-            while (getNodeByName.contains(c.toString+i.toString)) {
+            while (getNodeByName.contains(c.toString + i.toString)) {
                 i += 1
             }
-            c.toString+i.toString
+            c.toString + i.toString
         }
     }
 
@@ -456,7 +477,7 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
             if (span.nodeIds.map(x => getNodeById(x)).filter(x => x.name != None).size == 0) {
                 logger(1, "WARNING: Adding a variable name to a span")
                 val node = getNodeById(span.nodeIds(0))
-                var c : Char = node.concept(0)
+                var c: Char = node.concept(0)
                 if (c == '"') {
                     c = node.concept(1)
                 }
@@ -468,8 +489,8 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
         }
     }
 
-    def prettyString(detail: Int, pretty: Boolean) : String = {
-        val vars = Set.empty[String]        // set of variable names to be sure to keep in output 
+    def prettyString(detail: Int, pretty: Boolean): String = {
+        val vars = Set.empty[String] // set of variable names to be sure to keep in output
         if (root.name != None) {
             vars += root.name.get
         }
@@ -478,15 +499,15 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
     }
 
     def assignOpN() {
-        def numberOps(relations: List[(String, Node)]) : List[(String, Node)] = {
+        def numberOps(relations: List[(String, Node)]): List[(String, Node)] = {
             val ops = relations.filter(x => x._1 == ":op")
-            val opNs = ops.sortBy(x => spans(x._2.spans(0)).start).zipWithIndex.map(x => (x._1._1 + (x._2+1).toString, x._1._2))
+            val opNs = ops.sortBy(x => spans(x._2.spans(0)).start).zipWithIndex.map(x => (x._1._1 + (x._2 + 1).toString, x._1._2))
             val notOps = relations.filter(x => x._1 != ":op")
             return opNs ::: notOps
         }
-        def numberOpsVar(relations: List[(String, Var)]) : List[(String, Var)] = {
+        def numberOpsVar(relations: List[(String, Var)]): List[(String, Var)] = {
             val ops = relations.filter(x => x._1 == ":op")
-            val opNs = ops.sortBy(x => spans(x._2.node.spans(0)).start).zipWithIndex.map(x => (x._1._1 + (x._2+1).toString, x._1._2))
+            val opNs = ops.sortBy(x => spans(x._2.node.spans(0)).start).zipWithIndex.map(x => (x._1._1 + (x._2 + 1).toString, x._1._2))
             val notOps = relations.filter(x => x._1 != ":op")
             return opNs ::: notOps
         }
@@ -499,43 +520,55 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
 }
 
 object Graph {
+
     private class GraphParser extends JavaTokenParsers {
         // Parser implementation for parsing AMR graphs
-        def variable : Parser[String] = """[^ \t\n()":]+""".r
-        def concept : Parser[String] = """([^ \t\n()":]+)|("[^"]+")""".r
-        def relationStr : Parser[String] = """:[^ \t\n()":]+""".r
+        def variable: Parser[String] = """[^ \t\n()":]+""".r
+
+        def concept: Parser[String] = """([^ \t\n()":]+)|("[^"]+")""".r
+
+        def relationStr: Parser[String] = """:[^ \t\n()":]+""".r
+
         // The expressions below work correctly, but are more strict
         //def variable : Parser[String] = """[a-zA-Z0-9]+""".r
         //def concept : Parser[String] = """([a-zA-Z0-9.-]+)|("[^"]+")""".r
         //def relationStr : Parser[String] = """:[a-zA-Z0-9-]+""".r
-        def relation : Parser[(String, Node)] = relationStr~node ^^ {
-            case relationStr~node => (relationStr, node)
+        def relation: Parser[(String, Node)] = relationStr ~ node ^^ {
+            case relationStr ~ node => (relationStr, node)
         }
-        def relations : Parser[List[(String, Node)]] = rep(relation)
-        def internalNode : Parser[Node] = "("~>variable~"/"~concept~relations<~")" ^^ {
-            case variable~"/"~concept~relations => Node("", Some(variable), concept, List[(String, Node)](), relations, List[(String, Var)](), None, ArrayBuffer[Int]())
+
+        def relations: Parser[List[(String, Node)]] = rep(relation)
+
+        def internalNode: Parser[Node] = "(" ~> variable ~ "/" ~ concept ~ relations <~ ")" ^^ {
+            case variable ~ "/" ~ concept ~ relations => Node("", Some(variable), concept, List[(String, Node)](), relations, List[(String, Var)](), None, ArrayBuffer[Int]())
         }
-        def unnamedInternalNode : Parser[Node] = "("~>concept~relations<~")" ^^ {
-            case concept~relations => Node("", None, concept, List[(String, Node)](), relations, List[(String, Var)](), None, ArrayBuffer[Int]())
+
+        def unnamedInternalNode: Parser[Node] = "(" ~> concept ~ relations <~ ")" ^^ {
+            case concept ~ relations => Node("", None, concept, List[(String, Node)](), relations, List[(String, Var)](), None, ArrayBuffer[Int]())
         }
-        def terminalNode : Parser[Node] = concept ^^ { 
+
+        def terminalNode: Parser[Node] = concept ^^ {
             case concept => Node("", None, concept, List[(String, Node)](), List[(String, Node)](), List[(String, Var)](), None, ArrayBuffer[Int]())
         }
-        def node : Parser[Node] = terminalNode | internalNode | unnamedInternalNode
+
+        def node: Parser[Node] = terminalNode | internalNode | unnamedInternalNode
     }
 
     private val parser = new GraphParser()
 
-    def load(iterator: Iterator[String]) : Iterator[Graph] = {
+    def load(iterator: Iterator[String]): Iterator[Graph] = {
         for (line <- iterator) yield {
             parse(line)
         }
     }
 
-    def parse(amr: String) : Graph = {
+    def parse(amr: String): Graph = {
         val graph = parser.parseAll(parser.node, amr) match {
             case parser.Success(e, _) => Graph(e, new ArrayBuffer[Span](), Map[String, Node](), Map[String, Node]())
-            case _ => { assert(false, "Could not parse AMR: "+amr); Graph.empty }
+            case _ => {
+                assert(false, "Could not parse AMR: " + amr);
+                Graph.empty
+            }
         }
         graph.makeVariables()
         graph.unifyVariables()
@@ -545,9 +578,9 @@ object Graph {
 
     //def empty() : Graph = { val g = parse("(n / none)"); g.getNodeById.clear; g.getNodeByName.clear; return g }
     //def amrEmpty() : Graph = { parse("(a / amr-empty)") }
-    def empty() : Graph = {
-      val g = parse("(a / amr-empty)")
-      g.loadSpans("0-0|0", Array()) // TODO: delete me?
-      return g
+    def empty(): Graph = {
+        val g = parse("(a / amr-empty)")
+        g.loadSpans("0-0|0", Array()) // TODO: delete me?
+        return g
     }
 }
