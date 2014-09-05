@@ -19,7 +19,7 @@ class IlpDecoder(stage1FeatureNames: List[String],
                  labelSet: Array[(String, Int)]) extends Decoder {
     // these are the weights that will be updated during training
     // these include both stage1 and stage2 weights
-    val weights = FeatureVector(labelSet.map(_._1))
+    var weights = FeatureVector(labelSet.map(_._1))
     // we ignore stage1Features.weights, and only put all the weights in stage2Features.weights
     val stage1Features = new ConceptInvoke.Features(stage1FeatureNames)
     val stage2Features = new GraphDecoder.Features(stage2FeatureNames, weights.labelset)
@@ -35,12 +35,14 @@ class IlpDecoder(stage1FeatureNames: List[String],
 
         val (fullGraph, candidateFragments) = getCandidateFragments(input)
 
+        stage2Features.graph = fullGraph
+
         val scoresByRootNode: Map[String, Double] =
             candidateFragments.map(fragment => fragment.span.nodeIds.head -> fragment.score).toMap
 
 
-        assert(fullGraph.nodes.forall(_.name != None), "all nodes should have a name: " + fullGraph.nodes.filterNot(_.name != None))
-        val candidateNodes: Array[gNode] = fullGraph.nodes.toArray.sortBy(_.id)
+//        assert(fullGraph.nodes.forall(_.name != None), "all nodes should have a name: " + fullGraph.nodes.toList.map(n => n.concept + " " + n.name))
+        val candidateNodes: Array[gNode] = fullGraph.nodes.toArray //.sortBy(_.id)
         val indexByNodeId: Map[String, Int] = candidateNodes.zipWithIndex.map({ case (node, i) => node.id -> i}).toMap
         //    logger(1, s"indexByNodeId: $indexByNodeId")
         // map from token idx to list of Node indexes, only one of which may be in the final solution
@@ -55,6 +57,8 @@ class IlpDecoder(stage1FeatureNames: List[String],
         }
         //    logger(1, s"mutuallyRequiredNodesAndEdges $mutuallyRequiredNodesAndEdges")
         val nodeWeights: Array[Double] = candidateNodes.map(node => scoresByRootNode.getOrElse(node.id, 0.0))
+//        logger(1, "fullGraph.spans:\n" + fullGraph.spans.zipWithIndex.map({case (x, i) => i + " " + x.amr}).mkString("\n"))
+//        logger(1, "fullGraph.nodes.span0:\n" + fullGraph.nodes.toList.sortBy(_.spans(0)).map(n => n.spans(0) + " " + n.concept).mkString("\n"))
         val edgeWeights: Array[Array[Array[(String, Double)]]] = new GraphObj(fullGraph, candidateNodes, stage2Features).edgeWeights // TODO: don't need to score edges between mutually exclusive nodes
 
         val candidateFragmentByNode = Map() ++ (for (fragment <- candidateFragments; nodeId <- fragment.span.nodeIds.headOption) yield {
@@ -93,6 +97,7 @@ class IlpDecoder(stage1FeatureNames: List[String],
         var graph: Graph = Graph.empty()
         graph.getNodeById.clear()
         graph.getNodeByName.clear()
+        stage2Features.graph = graph
         for (fragment <- fragmentsToAdd) {
             graph.addNewSpan(fragment.span, fullGraph)
             val localFeatures = stage1Features.localFeatures(input, fragment.concepts, fragment.span.start, fragment.span.end)
@@ -149,6 +154,7 @@ class IlpDecoder(stage1FeatureNames: List[String],
                 candidateConcepts = CandidateFragment(concept, span, edges, score) :: candidateConcepts
             }
         }
+        graph.normalizeInverseRelations()
         (graph, candidateConcepts)
     }
 }

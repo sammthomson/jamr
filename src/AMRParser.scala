@@ -1,14 +1,10 @@
 package edu.cmu.lti.nlp.amr
 
-import scala.io.Source.fromFile
-import scala.collection.mutable.Map
-import scala.collection.mutable.Set
-import scala.collection.mutable.ArrayBuffer
-import java.util.Date
 import java.text.SimpleDateFormat
+import java.util.Date
 
-import edu.cmu.lti.nlp.amr.GraphDecoder._
-import edu.cmu.lti.nlp.amr.ConceptInvoke.PhraseConceptPair
+import scala.collection.mutable.Map
+import scala.io.Source.fromFile
 
 /****************************** Driver Program *****************************/
 object AMRParser {
@@ -25,6 +21,7 @@ scala -classpath . edu.cmu.lti.nlp.amr.AMRParser --stage2-decode -w weights -l l
         def isSwitch(s : String) = (s(0) == '-')
         list match {
             case Nil => map
+//            case "--train" :: l =>                       parseOptions(map + ('train -> "true"), l)
             case "--stage1-only" :: l =>                 parseOptions(map + ('stage1Only -> "true"), l)
             case "--stage1-oracle" :: l =>               parseOptions(map + ('stage1Oracle -> "true"), l)
             case "--stage1-train" :: l =>                parseOptions(map + ('stage1Train -> "true"), l)
@@ -38,6 +35,9 @@ scala -classpath . edu.cmu.lti.nlp.amr.AMRParser --stage2-decode -w weights -l l
             case "--stage2-weights" :: value :: l =>     parseOptions(map + ('stage2Weights -> value), l)
             case "--stage2-labelset" :: value :: l =>    parseOptions(map + ('stage2Labelset -> value), l)
             case "--stage2-not-connected" :: l =>        parseOptions(map + ('stage2NotConnected -> "true"), l)
+            case "--joint-decoder" :: value :: l =>      parseOptions(map + ('jointDecoder -> value), l)
+            case "--joint-train" :: l =>                 parseOptions(map + ('jointTrain -> "true"), l)
+            case "--joint-weights" :: value :: l =>      parseOptions(map + ('jointWeights -> value), l)
             case "--training-loss" :: value :: l =>      parseOptions(map + ('trainingLoss -> value), l)
             case "--training-cost-scale" :: value ::l => parseOptions(map + ('trainingCostScale -> value), l)
             case "--training-prec-recall" :: value ::l => parseOptions(map + ('trainingPrecRecallTradeoff -> value), l)
@@ -77,63 +77,60 @@ scala -classpath . edu.cmu.lti.nlp.amr.AMRParser --stage2-decode -w weights -l l
     def main(args: Array[String]) {
 
         if (args.length == 0) { println(usage); sys.exit(1) }
-        val options = parseOptions(Map(),args.toList)
+        val options = parseOptions(Map(), args.toList)
 
         verbosity = options.getOrElse('verbosity, "0").toInt
 
-        val outputFormat = options.getOrElse('outputFormat,"triples").split(",").toList
+        logger(0, s"options = $options")
 
-        val stage1 : ConceptInvoke.Decoder = {
-            if (!options.contains('stage1Oracle) && !options.contains('stage2Train)) {
-                ConceptInvoke.Decoder(options, oracle = false)
-            } else {
-                assert(!options.contains('stage1Train), "Error: --stage1-oracle should not be specified with --stage1-train")
-                ConceptInvoke.Decoder(options, oracle = true)
-            }
-        }
+        val outputFormat = options.getOrElse('outputFormat, "triples").split(",").toList
 
-        val stage2 : Option[GraphDecoder.Decoder] = {
-            if((options.contains('stage1Only) || options.contains('stage1Train)) && !options.contains('stage2Train)) {
-                None
-            } else {
-                Some(GraphDecoder.Decoder(options))
-            }
-        }
-
-        val stage2Oracle : Option[GraphDecoder.Decoder] = {
-            if(options.contains('trainingData) || options.contains('stage2Train)) {
-                Some(GraphDecoder.Oracle(options))
-            } else {
-                None
-            }
-        }
-
-        if (options.contains('stage1Train) || options.contains('stage2Train)) {
+        val doTrain = Seq('stage1Train, 'stage2Train, 'jointTrain).count(options.contains)
+        if (doTrain > 0) {
 
             ////////////////// Training  ////////////////
 
-            if (options.contains('stage1Train) && options.contains('stage2Train)) {
-                System.err.println("Error: please specify either stage1 training or stage2 training (not both)")
-                sys.exit(1)
-            }
+            assert(doTrain == 1, "Error: please specify exactly one of stage1, stage2, or joint training")
 
             if (options.contains('stage1Train)) {
-
                 val stage1 = new ConceptInvoke.TrainObj(options)
                 stage1.train
-
-            }
-
-            if (options.contains('stage2Train)) {
-
+            } else if (options.contains('stage2Train)) {
                 val stage2 = new GraphDecoder.TrainObj(options)
                 stage2.train
-
+            } else if (options.contains('jointTrain)) {
+                val joint =  new JointDecoder.TrainObj(options)
+                joint.train
             }
 
         } else {
 
             /////////////////// Decoding /////////////////
+
+            val stage1 : ConceptInvoke.Decoder = {
+                if (!options.contains('stage1Oracle) && !options.contains('stage2Train)) {
+                    ConceptInvoke.Decoder(options, oracle = false)
+                } else {
+                    assert(!options.contains('stage1Train), "Error: --stage1-oracle should not be specified with --stage1-train")
+                    ConceptInvoke.Decoder(options, oracle = true)
+                }
+            }
+
+            val stage2 : Option[GraphDecoder.Decoder] = {
+                if((options.contains('stage1Only) || options.contains('stage1Train)) && !options.contains('stage2Train)) {
+                    None
+                } else {
+                    Some(GraphDecoder.Decoder(options))
+                }
+            }
+
+            val stage2Oracle : Option[GraphDecoder.Decoder] = {
+                if(options.contains('trainingData) || options.contains('stage2Train)) {
+                    Some(GraphDecoder.Oracle(options))
+                } else {
+                    None
+                }
+            }
 
             if (!options.contains('stage1Weights)) {
                 System.err.println("Error: No stage1 weights file specified"); sys.exit(1)

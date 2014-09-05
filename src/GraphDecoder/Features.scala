@@ -10,7 +10,7 @@ import scala.collection.mutable.Map
 class Features(var featureNames: List[String], labelSet: Array[String]) {
     var weights = FeatureVector(labelSet: Array[String])    // TODO: maybe weights should be passed in to the constructor
     private var inputSave: Input = _
-    private var graph: Graph = _
+    var graph: Graph = _
     private var sentence: Array[String] = _
     private var dependencies: Annotation[Array[Dependency]] = _
     private var fullPos: Annotation[Array[String]] = _
@@ -157,6 +157,14 @@ class Features(var featureNames: List[String], labelSet: Array[String]) {
         // TODO: I'm assuming it is unlikely there are two identical concepts in a frag
         //logger(1,"fragHead node1.concept = "+node1.concept+" node2.concept = "+node2.concept)
         //logger(1,"fragHead node1.spans = "+node1.spans.toList+" node2.spans = "+node2.spans.toList)
+        if (node1.spans(0) >= graph.spans.size ) {
+            logger(1, "a graph.spans:\n" + graph.spans.zipWithIndex.map({case (x, i) => i + " " + x.amr}).mkString("\n"))
+            logger(1, "a graph.nodes.span0:\n" + node1.spans(0) + " " + node1.concept)
+        }
+        if (node2.spans(0) >= graph.spans.size ) {
+            logger(1, "b graph.spans:\n" + graph.spans.zipWithIndex.map({case (x, i) => i + " " + x.amr}).mkString("\n"))
+            logger(1, "b graph.nodes.span0:\n" + node2.spans(0) + " " + node2.concept)
+        }
         addFeature("C1NotFragHead", if (node1.concept != graph.spans(node1.spans(0)).amr.concept) { 1.0 } else { 0.0 }, 0.0)
         addFeature("C2NotFragHead", if (node2.concept != graph.spans(node2.spans(0)).amr.concept) { 1.0 } else { 0.0 }, 0.0)
     }

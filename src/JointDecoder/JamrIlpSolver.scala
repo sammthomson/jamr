@@ -1,17 +1,17 @@
 package edu.cmu.lti.nlp.amr.JointDecoder
 
+import edu.cmu.lti.nlp.amr._
 import edu.cmu.lti.nlp.amr.graph.Edge
 import edu.cmu.lti.nlp.amr.graph.Edge._
 import edu.cmu.lti.nlp.amr.ilp.Ops._
 import edu.cmu.lti.nlp.amr.ilp._
-import edu.cmu.lti.nlp.amr.logger
 import net.sf.javailp
 import net.sf.javailp.Constraint
 
 import scala.collection.immutable.IndexedSeq
 
 
-case class Node(id: String)
+case class GraphNode(id: String)
 case class Labeled[T](x: T, label: String)
 object Labeled {
   implicit def unwrap[T](labeled: Labeled[T]): T = labeled.x
@@ -23,11 +23,14 @@ class JamrIlpSolver(val ilpSolver: Solver) {
             edgeWeights: Array[Array[Array[(String, Double)]]],
             exclusionsByTokenId: collection.Map[Int, List[Int]],
             mutuallyRequiredNodesAndEdges: List[(List[Int], List[(Int, Int, String)])],
-            determinismByLabel: collection.Map[String, Int]): (IndexedSeq[Node], Seq[Labeled[Edge[Node]]]) = {
-    val realNodes: IndexedSeq[Node] = (0 until nodeWeights.size).map(i => Node(i.toString))
-    val dummyRoot = Node("root")
-    val dummyEdges: IndexedSeq[Labeled[Edge[Node]]] = realNodes.map(n => Labeled(dummyRoot ~> n, "rootSelector"))
-    val realEdges: Array[Array[Array[Labeled[Edge[Node]]]]] =
+            determinismByLabel: collection.Map[String, Int]): (IndexedSeq[GraphNode], Seq[Labeled[Edge[GraphNode]]]) = {
+    if (nodeWeights.isEmpty) {
+        return (Vector(), Seq())
+    }
+    val realNodes: IndexedSeq[GraphNode] = (0 until nodeWeights.size).map(i => GraphNode(i.toString))
+    val dummyRoot = GraphNode("root")
+    val dummyEdges: IndexedSeq[Labeled[Edge[GraphNode]]] = realNodes.map(n => Labeled(dummyRoot ~> n, "rootSelector"))
+    val realEdges: Array[Array[Array[Labeled[Edge[GraphNode]]]]] =
       edgeWeights.zip(realNodes).map { case (srcWeights, src) =>
         srcWeights.zip(realNodes).map { case (destWeights, dest) =>
           destWeights.map { case (label, weight) =>
@@ -55,23 +58,25 @@ class JamrIlpSolver(val ilpSolver: Solver) {
       mutuallyRequiredConstraints
     /* Objective */
     val objective: Objective = {
-      val nodeObjTerms = nodeVars.zip(nodeWeights) collect { case (nodeVar, weight) if weight != 0.0 => nodeVar * weight }
-      val edgeObjTerms: Seq[Linear] = realEdgeVars.toSeq.flatten.flatten.zip(edgeWeights.toSeq.flatten.flatten) collect {
-        case (edgeVar, (_, weight: Double)) if weight != 0.0 => edgeVar.x * weight
-      }
-      Maximize((nodeObjTerms.toSeq ++ edgeObjTerms).reduce(plus))
+        val nodeObjTerms = nodeVars.zip(nodeWeights).map({case (n, w) => n * w}) //collect { case (nodeVar, weight) if weight != 0.0 => nodeVar * weight }
+        val edgeObjTerms: Seq[Linear] = realEdgeVars.toSeq.flatten.flatten.zip(edgeWeights.toSeq.flatten.flatten).map({case(e, (_, w)) => e.x * w}) //collect {
+//            case (edgeVar, (_, weight: Double)) if weight != 0.0 => edgeVar.x * weight
+//          }
+        Maximize((nodeObjTerms.toSeq ++ edgeObjTerms).reduce(plus))
     }
     val problem = Problem(variables, objective, constraints)
-    logger(1, s"problem: $problem")
+//    logger(1, s"problem: $problem")
     // solve it
     val result = ilpSolver.solve(problem)
-    logger(1, s"result: $result")
+//    logger(1, s"result: $result")
     val solnNodes = {
       realNodes.zip(nodeVars).collect({ case (n, nodeVar) if result.getBoolean(nodeVar) => n })
     }
     val solnEdges = (realEdges.toSeq.flatten.flatten zip realEdgeVars.toSeq.flatten.flatten).collect({
       case (e, v) if e.src != dummyRoot && result.getBoolean(v.x) => e
     })
+    logger(1, s"solnNodes: $solnNodes")
+    logger(1, s"solnEdges: $solnEdges")
     (solnNodes, solnEdges)
   }
 
@@ -94,7 +99,7 @@ class JamrIlpSolver(val ilpSolver: Solver) {
     constraints.flatten
   }
 
-  protected def toBoolVar(edge: Labeled[Edge[Node]]): Labeled[BoolVar] = {
+  protected def toBoolVar(edge: Labeled[Edge[GraphNode]]): Labeled[BoolVar] = {
     Labeled(BoolVar("n%s~%s~>n%s".format(edge.src.id, edge.label, edge.dest.id)), edge.label)
   }
 

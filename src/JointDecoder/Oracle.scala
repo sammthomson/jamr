@@ -1,17 +1,15 @@
 package edu.cmu.lti.nlp.amr.JointDecoder
-import edu.cmu.lti.nlp.amr._
 import edu.cmu.lti.nlp.amr.FastFeatureVector._
+import edu.cmu.lti.nlp.amr._
 
-import scala.collection.mutable.Map
 import scala.collection.mutable.Set
-import scala.collection.mutable.ArrayBuffer
 
 class Oracle(stage1FeatureNames: List[String],
              phraseConceptPairs: Array[ConceptInvoke.PhraseConceptPair],  // this is the concept table
              stage2FeatureNames: List[String],
              labelSet: Array[(String, Int)]) extends Decoder {
 
-    val weights = FeatureVector(labelSet.map(_._1))
+    var weights = FeatureVector(labelSet.map(_._1))
     val stage1Features = new ConceptInvoke.Features(stage1FeatureNames)
     val stage2Features = new GraphDecoder.Features(stage2FeatureNames, weights.labelset)
 

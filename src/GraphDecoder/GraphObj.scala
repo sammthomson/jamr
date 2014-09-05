@@ -73,7 +73,7 @@ case class GraphObj(graph: Graph,
                 } else {
                     edgeWeights(i)(j) = Array.fill(features.weights.labelset.size)(("", 0.0))
                     val feats = features.localFeatures(nodes(i), nodes(j))
-                    logger(1, s"i: $i, j: $j, feats: $feats")
+//                    logger(1, s"i: $i, j: $j, feats: $feats")
                     features.weights.iterateOverLabels2(feats,
                         x => edgeWeights(i)(j)(x.labelIndex) = (features.weights.labelset(x.labelIndex), x.value))
                 }

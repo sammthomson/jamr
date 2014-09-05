@@ -1,0 +1,157 @@
+package edu.cmu.lti.nlp.amr.JointDecoder
+
+import edu.cmu.lti.nlp.amr.FastFeatureVector._
+import edu.cmu.lti.nlp.amr.Input.Input
+import edu.cmu.lti.nlp.amr._
+
+import scala.collection.mutable.Map
+import scala.io.Source.fromFile
+import scala.sys.process._
+
+class TrainObj(val options : Map[Symbol, String]) extends edu.cmu.lti.nlp.amr.Train.TrainObj[FeatureVector](options) {
+    //val decoder = Decoder(options)
+    //val oracle = new Oracle(getFeatures(options))
+    //val costAug = new CostAugmented(Decoder(options), options.getOrElse('trainingCostScale,"10.0").toDouble)
+    //val weights = decoder.features.weights
+    //oracle.features.weights = weights
+    //costAug.features.weights = weights
+
+    var optimizer = options.getOrElse('trainingOptimizer, "Adagrad") match {     // TODO: this should go back into Train/TrainObj
+        case "SSGD" => new SSGD()
+        case "Adagrad" => new Adagrad()
+        case x => { System.err.println("Error: unknown training optimizer " + x); sys.exit(1) }
+    }
+
+    val outputFormat = options.getOrElse('outputFormat, "triples").split(",").toList
+
+    def decode(i: Int, weights: FeatureVector) : (FeatureVector, Double, String) = {
+        val decoder = JointDecoder.Decoder(options)
+        decoder.weights = weights
+        val amrdata1 = AMRTrainingData(training(i))
+        logger(0, "Sentence:\n"+amrdata1.sentence.mkString(" ")+"\n")
+        val result = decoder.decode(Input(amrdata1, input(i), oracle = false))
+        logger(0, "Spans:")
+        for ((span, i) <- amrdata1.graph.spans.zipWithIndex) {
+            logger(0, "Span "+(i+1).toString+":  "+span.words+" => "+span.amr)
+        }
+        logger(0, "AMR:")
+        if (outputFormat.contains("AMR")) {
+            logger(0, result.graph.prettyString(detail = 1, pretty = true)+"\n")
+        }
+        if (outputFormat.contains("triples")) {
+            //logger(0, result.graph.printTriples(detail = 1)+"\n")
+            logger(0, result.graph.printTriples(
+                detail = 1,
+                extra = (node1, node2, relation) => { // TODO: put back in
+                    "" //"\t"+decoder.features.ffDependencyPathv2(node1, node2, relation).toString.split("\n").filter(_.matches("^C1.*")).toList.toString+"\t"+decoder.features.localScore(node1, node2, relation).toString
+                })+"\n")
+        }
+//        logger(1, "Decoder features:\n"+result.features+"\n")
+        return (result.features, result.score, if (outputFormat.contains("AMR")) { result.graph.prettyString(detail = 1, pretty = true) } else { "" })
+    }
+
+    def oracle(i: Int, weights: FeatureVector) : (FeatureVector, Double) = {
+        val oracle = Oracle(options)
+        oracle.weights = weights
+        val amrdata = AMRTrainingData(training(i))
+        val result = oracle.decode(Input(amrdata, input(i), oracle = true))
+
+        logger(0, "Oracle:")
+//        if (outputFormat.contains("AMR")) {
+//           val result2 = oracle.decode(Input(amrdata, input(i), oracle = true, clearUnalignedNodes = false))
+//           logger(0, result2.graph.prettyString(detail = 1, pretty = true)+"\n")
+//        }
+        if (outputFormat.contains("triples")) {
+           //logger(0, result.graph.printTriples(detail = 1)+"\n")
+           logger(0, result.graph.printTriples(
+                detail = 1,
+                extra = (node1, node2, relation) => {
+                    "" //"\t"+oracle.features.ffDependencyPathv2(node1, node2, relation).toString.split("\n").filter(_.matches("^C1.*")).toList.toString+"\t"+decoder.features.localScore(node1, node2, relation).toString
+                })+"\n")
+        }
+        //logger(0, "Dependencies:\n"+dependencies(i)+"\n")
+        logger(1, "Oracle features:\n"+result.features+"\n")
+        return (result.features, result.score)
+    }
+
+//    def costAugmented(i: Int, weights: FeatureVector, scale: Double) : (FeatureVector, Double) = {
+//        val decoder = Decoder(options)
+//        decoder.weights = weights
+//        val costAug = new CostAugmented(Decoder(options), scale, options.getOrElse('trainingPrecRecallTradeoff,"0.5").toDouble)
+//        costAug.features.weights = weights
+//
+//        val amrdata1 = AMRTrainingData(training(i))
+//        logger(0, "Sentence:\n"+amrdata1.sentence.mkString(" ")+"\n")
+//        val result = costAug.decode(Input(amrdata1, input(i), oracle = true))
+//        logger(0, "Spans:")
+//        for ((span, i) <- amrdata1.graph.spans.zipWithIndex) {
+//            logger(0, "Span "+(i+1).toString+":  "+span.words+" => "+span.amr)
+//        }
+//        logger(0, "AMR:")
+//        if (outputFormat.contains("AMR")) {
+//            logger(0, result.graph.prettyString(detail = 1, pretty = true)+"\n")
+//        }
+//        if (outputFormat.contains("triples")) {
+//            //logger(0, result.graph.printTriples(detail = 1)+"\n")
+//            logger(0, result.graph.printTriples(
+//                detail = 1,
+//                extra = (node1, node2, relation) => {
+//                    "" //"\t"+costAug.features.ffDependencyPathv2(node1, node2, relation).toString.split("\n").filter(_.matches("^C1.*")).toList.toString+"\t"+costAug.features.localScore(node1, node2, relation).toString
+//                })+"\n")
+//        }
+//        logger(1, "Decoder features:\n"+result.features+"\n")
+//        return (result.features, result.score)
+//    }
+
+    def costAugmented(i: Int, weights: FeatureVector, scale: Double) : (FeatureVector, Double) = {
+        val (feats, score, _) = decode(i, weights)
+        return (feats, score)
+    }
+
+    def train {
+        train(FeatureVector(GraphDecoder.getLabelset(options).map(x => x._1)))
+    }
+
+    def evalDev(options: Map[Symbol, String], pass: Int, weights: FeatureVector) {
+        val devDecode = options('trainingOutputFile)+".iter"+pass.toString+".decode_dev"
+        val dev = options('trainingDev) // assumes .aligned, .aligned.no_opN, .snt, .tok, .snt.deps, .snt.IllinoisNER
+
+//        val snt = fromFile(dev + ".aligned.no_opN").getLines().toArray // aka 'input' in AMRParser decode
+        val tokenized = fromFile(dev + ".snt.tok").getLines().toArray
+//        val nerFile = Corpus.splitOnNewline(fromFile(dev + ".snt.IllinoisNER").getLines()).toArray
+        val dependencies = Corpus.splitOnNewline(fromFile(dev + ".snt.deps").getLines()).map(block => block.replaceAllLiterally("-LRB-","(").replaceAllLiterally("-RRB-",")").replaceAllLiterally("""\/""","/")).toArray
+
+        val file = new java.io.PrintWriter(new java.io.File(devDecode), "UTF-8")
+        for((block, i) <- Corpus.splitOnNewline(fromFile(dev + ".aligned.no_opN").getLines()).zipWithIndex) {
+            val inputGraph = AMRTrainingData(block).toInputGraph()
+            val decoder = JointDecoder.Decoder(options)
+            decoder.weights = weights
+            // TODO: change to not provide gold concepts (ok since we throw it away anyway)
+            val decoderResult = decoder.decode(new Input(inputGraph, tokenized(i).split(" "), dependencies(i)))
+            file.println(decoderResult.graph.prettyString(detail=1, pretty=true) + '\n')
+        }
+        file.close()
+
+        try {
+            val externalEval = stringToProcess("python "+options('smatchEval)+" -f "+devDecode+" "+dev+".aligned").lines.toList
+            logger(0, "--- Performance on Dev ---\n" + externalEval.mkString("\n") + "\n")
+        } catch {
+            case _ : Throwable => 
+        }
+    }
+
+/*  TODO: port back from SDP
+    def f1SufficientStatistics(i: Int, weights: FeatureVector) : (Double, Double, Double) = {
+        // returns (num_correct, num_predicted, num_gold)
+        val decoder = Decoder(options)
+        decoder.features.weights = weights
+        val result = decoder.decode(Input(inputAnnotatedSentences(i), inputGraphs(i)))
+        
+        val oracle = new Oracle(getFeatures(options), labelset)
+        oracle.features.weights = weights
+        val oracleResult = oracle.decode(Input(inputAnnotatedSentences(i), oracleGraphs(i)))
+
+        return SDPGraph.evaluate(result.graph.asInstanceOf[SDPGraph], oracleResult.graph.asInstanceOf[SDPGraph])
+    } */
+}
+
