@@ -33,6 +33,7 @@ class IlpDecoder(stage1FeatureNames: List[String],
     val ilpSolver = JamrIlpSolver.gurobi
 
     def decode(input: Input): FastFeatureVector.DecoderResult = {
+        logger(1, s"begin joint decoding ${input.sentence.mkString(" ")}")
         stage2Features.input = input
         stage2Features.weights = weights
         var feats = new FeatureVector(weights.labelset)
@@ -127,7 +128,7 @@ class IlpDecoder(stage1FeatureNames: List[String],
         } else {
             graph = Graph.empty()
         }
-
+        logger(1, s"finished joint decoding ${input.sentence.mkString(" ")}")
         DecoderResult(graph, feats, weights.dot(feats))
     }
 

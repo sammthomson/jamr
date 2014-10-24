@@ -3,10 +3,9 @@ package edu.cmu.lti.nlp.amr.JointDecoder
 import edu.cmu.lti.nlp.amr._
 import edu.cmu.lti.nlp.amr.graph.Edge
 import edu.cmu.lti.nlp.amr.graph.Edge._
-import edu.cmu.lti.nlp.amr.ilp.Ops._
 import edu.cmu.lti.nlp.amr.ilp._
 import net.sf.javailp
-import net.sf.javailp.{Term, Constraint}
+import net.sf.javailp.Constraint
 
 import scala.collection.immutable.IndexedSeq
 
@@ -26,6 +25,7 @@ class JamrIlpSolver(val ilpSolver: Solver) {
             exclusions: Iterable[List[Int]],
             mutuallyRequiredNodesAndEdges: List[MutuallyRequired],
             determinismByLabel: collection.Map[String, Int]): (Seq[Int], Seq[EdgeWithNodeIdxs]) = {
+    logger(1, "building ILP problem")
     if (nodeWeights.isEmpty) {
         return (Vector(), Seq())
     }
@@ -59,9 +59,9 @@ class JamrIlpSolver(val ilpSolver: Solver) {
         mutuallyRequiredConstraints
     /* Objective */
     val objective: Objective = {
-        val nodeObjTerms = nodeVars.zip(nodeWeights).map({case (n, w) => new Term(n, w)}) //n * w}) //collect { case (nodeVar, weight) if weight != 0.0 => nodeVar * weight }
-        val edgeObjTerms: Seq[Term] = realEdgeVars.toSeq.flatten.flatten.zip(edgeWeights.toSeq.flatten.flatten).map({
-                case(e, (_, w)) => new Term(e.x, w) //e.x * w
+        val nodeObjTerms = nodeVars.zip(nodeWeights).collect { case (n, w) if w != 0.0 => n * w }
+        val edgeObjTerms = realEdgeVars.toSeq.flatten.flatten.zip(edgeWeights.toSeq.flatten.flatten).map({
+                case(e, (_, w)) => e.x * w
             }) //collect {
 //            case (edgeVar, (_, weight: Double)) if weight != 0.0 => edgeVar.x * weight
 //          }
@@ -70,7 +70,10 @@ class JamrIlpSolver(val ilpSolver: Solver) {
     val problem = Problem(variables, objective, constraints)
 //    logger(1, s"problem: $problem")
     // solve it
+    logger(1, "sending ILP problem to Gurobi")
+
     val result = ilpSolver.solve(problem)
+    logger(1, "got ILP solution from Gurobi")
 //    logger(1, s"result: $result")
     val solnNodes: IndexedSeq[Int] = {
         (0 until nodeWeights.size).zip(nodeVars).collect({ case (i, nodeVar) if result.getBoolean(nodeVar) => i })
@@ -92,9 +95,9 @@ class JamrIlpSolver(val ilpSolver: Solver) {
   }
 
   def getExclusionConstraints(nodeVars: Seq[BoolVar], exclusions: Iterable[List[Int]]): Iterable[Constraint] = {
-    for (nodeIdxs <- exclusions) yield {
-      nodeIdxs.map(nodeVars(_) * 1).reduce(plus) lteq 1
-    }
+      for (nodeIdxs <- exclusions) yield {
+          Linear(nodeIdxs.map(nodeVars(_) * 1)) lteq 1
+      }
   }
 
   def getMutuallyRequiredConstraints(realNodeVars: Seq[BoolVar],
@@ -138,12 +141,12 @@ class JamrIlpSolver(val ilpSolver: Solver) {
     val simpleConstraints =
       for (srcIdx <- 0 until realNodeVars.size;
            destIdx <- 0 until realNodeVars.size) yield {
-        val forwardEdges = realEdgeVars(srcIdx)(destIdx).map(_ * 1).reduce(plus)
-        val backwardEdges = realEdgeVars(destIdx)(srcIdx).map(_ * 1).reduce(plus)
+        val forwardEdges = Linear(realEdgeVars(srcIdx)(destIdx).map(_ * 1))
+        val backwardEdges = Linear(realEdgeVars(destIdx)(srcIdx).map(_ * 1))
         forwardEdges plus backwardEdges lteq 1
       }
     // the root may only have one child
-    val singleRootConstraint = dummyEdgeVars.map(_ * 1).reduce(plus) lteq 1
+    val singleRootConstraint = Linear(dummyEdgeVars.map(_ * 1)) lteq 1
     edgeLeEndsConstraints.toSeq ++ simpleConstraints :+ singleRootConstraint
   }
 
@@ -154,7 +157,7 @@ class JamrIlpSolver(val ilpSolver: Solver) {
     for (outgoingEdges <- realEdgeVars;
          (label, maxOutEdges) <- determinismByLabel/*;
          labelIdx <- labels.get(label)*/) yield {
-      outgoingEdges.toSeq.flatten.collect({ case Labeled(edgeVar, `label`) => edgeVar * 1 }).reduce(plus) lteq maxOutEdges
+      Linear(outgoingEdges.toSeq.flatten.collect({ case Labeled(edgeVar, `label`) => edgeVar * 1 })) lteq maxOutEdges
     }
   }
 
@@ -166,7 +169,7 @@ class JamrIlpSolver(val ilpSolver: Solver) {
     val dummyFlowVars = dummyEdgeVars.map(e => IntVar(s"flow(${e.x})"))
     val flowConstraints: Seq[Constraint] = {
       // The root must send out 1 unit of flow for each node present
-      val rootFlowConstraint = dummyFlowVars.map(_ * 1).reduce(plus) minus nodeVars.map(_ * 1).reduce(plus) equiv 0
+      val rootFlowConstraint = Linear(dummyFlowVars.map(_ * 1)) minus Linear(nodeVars.map(_ * 1)) equiv 0
       // Flow may only be sent over an edge if the edge is included in the solution
       val flowLeEdgeConstraints = (for (srcIdx <- 0 until nodeVars.size;
            destIdx <- 0 until nodeVars.size;
@@ -176,12 +179,12 @@ class JamrIlpSolver(val ilpSolver: Solver) {
         edgeVar * nodeVars.size minus flowVar gteq 0
       })
       // TODO: might be better to use gurobi's explicit mechanism for upper/lower bounds on IntVars
-      val flowGeZeroConstraints = realFlowVars.flatMap(_.flatMap(_.map(_ gteq 0))).toSeq ++ dummyFlowVars.map(_ gteq 0)
+      val flowGeZeroConstraints = realFlowVars.flatMap(_.flatMap(_.map(_ * 1 gteq 0))).toSeq ++ dummyFlowVars.map(_ * 1 gteq 0)
       // Each non-root node must consume exactly one unit of flow, if it is included in the solution
       val consumeOneFlowConstraints = nodeVars.zipWithIndex.map { case (nodeVar, i) =>
         val incoming = (dummyFlowVars(i) :: (0 until nodeVars.size).map(srcIdx => realFlowVars(srcIdx)(i)).toList.flatten).map(_ * 1)
         val outgoing = (0 until nodeVars.size).map(destIdx => realFlowVars(i)(destIdx)).flatten.map(_ * -1)
-        (incoming ++ outgoing).reduce(plus) minus nodeVar equiv 0
+        Linear(incoming ++ outgoing) minus nodeVar equiv 0
       }
       flowGeZeroConstraints ++ flowLeEdgeConstraints ++ consumeOneFlowConstraints :+ rootFlowConstraint
     }

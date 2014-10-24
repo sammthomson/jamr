@@ -1,18 +1,19 @@
 package edu.cmu.lti.nlp.amr.ilp
 
 import net.sf.javailp
-import javailp.{Operator, VarType, Term, Constraint, OptType}
-import Operator.{EQ, LE, GE}
-import VarType.{INT, BOOL, REAL}
+import net.sf.javailp.Operator.{EQ, GE, LE}
+import net.sf.javailp.VarType.{BOOL, INT, REAL}
+import net.sf.javailp.{Constraint, OptType, VarType}
+
 import scala.collection.JavaConversions._
 
 
 sealed abstract class Var(val name: String, val varType: VarType) {
-  def * (coefficient: Number): Linear = Linear(Seq(new Term(this, coefficient)))
+  def * (coefficient: Double): Term = Term(this, coefficient)
   override def toString: String = name
 }
-
 object Var {
+  implicit def asTerm(v: Var): Term = v * 1
   implicit def asLinear(v: Var): Linear = v * 1
 }
 
@@ -22,19 +23,25 @@ case class BoolVar(override val name: String) extends Var(name, BOOL)
 
 case class RealVar(override val name: String) extends Var(name, REAL)
 
+case class Term(variable: Var, coefficient: Double)
+object Term {
+    implicit def asLinear(t: Term): Linear = Linear(Seq(t))
+    implicit def toJavaIlpTerm(t: Term): javailp.Term = new javailp.Term(t.variable, t.coefficient)
+}
+
+
 case class Linear(terms: Seq[Term]) {
   def plus (other: Linear): Linear = Linear(terms ++ other.terms)
   def minus (other: Linear): Linear = {
-    Linear(terms ++ other.terms.map(t => new Term(t.getVariable, -t.getCoefficient.doubleValue)))
+    Linear(terms ++ other.terms.map(t => t.copy(coefficient = -t.coefficient)))
   }
 
   def equiv(x: Number): Constraint = new Constraint(toString.take(255), this, EQ, x)
   def lteq(x: Number): Constraint = new Constraint(toString.take(255), this, LE, x)
   def gteq(x: Number): Constraint = new Constraint(toString.take(255), this, GE, x)
 }
-
 object Linear {
-  implicit def toLinear(linear: Linear): javailp.Linear = new javailp.Linear(linear.terms)
+  implicit def toLinear(linear: Linear): javailp.Linear = new javailp.Linear(linear.terms.map(Term.toJavaIlpTerm))
 }
 
 object Ops {

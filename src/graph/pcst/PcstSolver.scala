@@ -2,7 +2,6 @@ package edu.cmu.lti.nlp.amr.graph.pcst
 
 import edu.cmu.lti.nlp.amr.graph.Edge._
 import edu.cmu.lti.nlp.amr.graph._
-import edu.cmu.lti.nlp.amr.ilp.Ops._
 import edu.cmu.lti.nlp.amr.ilp._
 import edu.cmu.lti.nlp.amr.util.Weighted
 import edu.cmu.lti.nlp.amr.util.Weighted._
@@ -41,7 +40,7 @@ class PcstSolver(val ilpSolver: Solver) {
     val objective = {
       val nodeObjTerms = nodeVars collect { case (node, nodeVar) if node.weight != 0.0 => nodeVar * node.weight }
       val edgeObjTerms = edgeVars collect { case (edge, edgeVar) if edge.weight != 0.0 => edgeVar * edge.weight }
-      Maximize((nodeObjTerms.toSeq ++ edgeObjTerms).reduce(plus))
+      Maximize(Linear(nodeObjTerms.toSeq ++ edgeObjTerms))
     }
     val problem = Problem(variables, objective, constraints)
     // solve it
@@ -81,7 +80,7 @@ class PcstSolver(val ilpSolver: Solver) {
         fwdEdge plus bkwdEdge lteq 1
       }
     // the root may only have one child
-    val singleRootConstraint = dummyEdges.values.map(edgeVars(_) * 1).reduce(plus) lteq 1
+    val singleRootConstraint = Linear(dummyEdges.values.map(edgeVars(_) * 1).toSeq) lteq 1
     edgeLeEndsConstraints.toSeq ++ simpleConstraints :+ singleRootConstraint
   }
 
@@ -107,7 +106,7 @@ class PcstSolver(val ilpSolver: Solver) {
     val flowConstraints: Seq[Constraint] = {
       // The root must send out 1 unit of flow for each node present
       val rootFlowConstraint = {
-        dummyEdges.values.map(flowVars(_) * 1).reduce(plus) minus nodeVars.values.map(_ * 1).reduce(plus) equiv 0
+        Linear(dummyEdges.values.map(flowVars(_) * 1).toSeq) minus Linear(nodeVars.values.map(_ * 1).toSeq) equiv 0
       }
       // Flow may only be sent over an edge if the edge is included in the solution
       val flowLeEdgeConstraints = edges.map(e => edgeVars(e) * nodes.size minus flowVars(e) gteq 0)
@@ -117,7 +116,7 @@ class PcstSolver(val ilpSolver: Solver) {
       val consumeOneFlowConstraints = nodes.map { n =>
         val incoming = (dummyEdges(n) :: graph.incomingEdges(n).toList).map(flowVars(_) * 1)
         val outgoing = graph.outgoingEdges(n).toList.map(flowVars(_) * -1)
-        (incoming ++ outgoing).reduce(plus) minus nodeVars(n) equiv 0
+        Linear(incoming ++ outgoing) minus nodeVars(n) equiv 0
       }
       flowGeZeroConstraints ++ flowLeEdgeConstraints ++ consumeOneFlowConstraints :+ rootFlowConstraint
     }
@@ -136,7 +135,7 @@ class PcstSolver(val ilpSolver: Solver) {
     val flowConstraints = {
       // The root must send out one unit of flow to each node that is present
       val rootFlowConstraints = nodes map { flowType =>
-        dummyEdges.values.map(e => flowVars(flowType)(e) * 1).reduce(plus) minus nodeVars(flowType) equiv 0
+        Linear(dummyEdges.values.map(e => flowVars(flowType)(e) * 1).toSeq) minus nodeVars(flowType) equiv 0
       }
       // Flow may only be sent over an edge if the edge is included in the solution
       val flowLeEdgeConstraints = nodes flatMap { flowType => edges map { e =>
@@ -149,9 +148,9 @@ class PcstSolver(val ilpSolver: Solver) {
           val incoming = (dummyEdges(n) :: graph.incomingEdges(n).toList).map(flows(_) * 1)
           val outgoing = graph.outgoingEdges(n).map(flows(_) * -1)
           if (flowType == n) {
-            (incoming ++ outgoing).reduce(plus) minus nodeVars(n) equiv 0
+            Linear(incoming ++ outgoing) minus nodeVars(n) equiv 0
           } else {
-            (incoming ++ outgoing).reduce(plus) equiv 0
+            Linear(incoming ++ outgoing) equiv 0
           }
         }
       }
