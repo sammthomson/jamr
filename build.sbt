@@ -21,6 +21,8 @@ scalaSource in Compile := baseDirectory.value / "src"
 
 scalaSource in Test := baseDirectory.value / "test"
 
+ideaExcludeFolders ++= Seq(".idea", "experiments", "data")
+
 // Running JAMR via sbt:
 
 fork in run := true  // run in separate JVM than sbt

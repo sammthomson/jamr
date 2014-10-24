@@ -64,7 +64,7 @@ case class GraphObj(graph: Graph,
 
     private def computeWeightMatrix : Array[Array[Array[(String, Double)]]] = {
         val edgeWeights : Array[Array[Array[(String, Double)]]] = nodes.map(x => Array.fill(0)(Array.fill(0)("",0.0)))
-        logger(1, features.weights)
+//        logger(1, features.weights)
         for (i <- 0 until nodes.size) {
             edgeWeights(i) = nodes.map(x => Array.fill(0)(("",0.0)))
             for (j <- 0 until nodes.size) {

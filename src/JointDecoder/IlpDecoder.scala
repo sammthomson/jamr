@@ -3,7 +3,7 @@ package edu.cmu.lti.nlp.amr.JointDecoder
 import edu.cmu.lti.nlp.amr.ConceptInvoke.PhraseConceptPair
 import edu.cmu.lti.nlp.amr.FastFeatureVector._
 import edu.cmu.lti.nlp.amr.GraphDecoder.GraphObj
-import edu.cmu.lti.nlp.amr.{Node => gNode, _}
+import edu.cmu.lti.nlp.amr._
 
 import scala.collection.{mutable => m}
 
@@ -12,6 +12,10 @@ case class CandidateFragment(concepts: PhraseConceptPair,
                              span: Span,
                              edges: List[(String, String, String)],
                              score: Double)
+
+/** nodes and edges that must either all be in the solution, or none be in the solution */
+case class MutuallyRequired(nodeIds: List[Int], edges: List[EdgeWithNodeIdxs])
+
 
 class IlpDecoder(stage1FeatureNames: List[String],
                  phraseConceptPairs: Array[ConceptInvoke.PhraseConceptPair], // this is the concept table
@@ -37,63 +41,60 @@ class IlpDecoder(stage1FeatureNames: List[String],
 
         stage2Features.graph = fullGraph
 
-        val scoresByRootNode: Map[String, Double] =
-            candidateFragments.map(fragment => fragment.span.nodeIds.head -> fragment.score).toMap
-
-
-//        assert(fullGraph.nodes.forall(_.name != None), "all nodes should have a name: " + fullGraph.nodes.toList.map(n => n.concept + " " + n.name))
-        val candidateNodes: Array[gNode] = fullGraph.nodes.toArray //.sortBy(_.id)
+        //        assert(fullGraph.nodes.forall(_.name != None), "all nodes should have a name: " + fullGraph.nodes.toList.map(n => n.concept + " " + n.name))
+        val candidateNodes: Array[Node] = fullGraph.nodes.toArray //.sortBy(_.id)
         val indexByNodeId: Map[String, Int] = candidateNodes.zipWithIndex.map({ case (node, i) => node.id -> i}).toMap
-        //    logger(1, s"indexByNodeId: $indexByNodeId")
-        // map from token idx to list of Node indexes, only one of which may be in the final solution
-        val exclusionsByTokenId = m.Map[Int, List[Int]]()
-        for (fragment <- candidateFragments;
-             i <- fragment.span.start until fragment.span.end) {
-            exclusionsByTokenId += i -> (indexByNodeId(fragment.span.nodeIds.head) :: exclusionsByTokenId.getOrElse(i, Nil))
-        }
-        val mutuallyRequiredNodesAndEdges: List[(List[Int], List[(Int, Int, String)])] = for (fragment <- candidateFragments) yield {
-            val edges: List[(Int, Int, String)] = fragment.edges.map { case (srcId, label, destId) => (indexByNodeId(srcId), indexByNodeId(destId), label)}
-            (fragment.span.nodeIds.map(indexByNodeId), edges)
-        }
-        //    logger(1, s"mutuallyRequiredNodesAndEdges $mutuallyRequiredNodesAndEdges")
-        val nodeWeights: Array[Double] = candidateNodes.map(node => scoresByRootNode.getOrElse(node.id, 0.0))
-//        logger(1, "fullGraph.spans:\n" + fullGraph.spans.zipWithIndex.map({case (x, i) => i + " " + x.amr}).mkString("\n"))
-//        logger(1, "fullGraph.nodes.span0:\n" + fullGraph.nodes.toList.sortBy(_.spans(0)).map(n => n.spans(0) + " " + n.concept).mkString("\n"))
-        val edgeWeights: Array[Array[Array[(String, Double)]]] = new GraphObj(fullGraph, candidateNodes, stage2Features).edgeWeights // TODO: don't need to score edges between mutually exclusive nodes
+        val scoresByRootNodeId: Map[String, Double] =
+            candidateFragments.map(fragment => fragment.span.nodeIds.head -> fragment.score).toMap
+        val nodeWeights: Array[Double] = candidateNodes.map(node => scoresByRootNodeId.getOrElse(node.id, 0.0))
 
-        val candidateFragmentByNode = Map() ++ (for (fragment <- candidateFragments; nodeId <- fragment.span.nodeIds.headOption) yield {
-            nodeId -> fragment
-        })
+        val candidateFragmentByNodeIdx: Map[Int, CandidateFragment] = Map() ++ (
+            for (fragment <- candidateFragments;
+                 nodeId <- fragment.span.nodeIds.headOption) yield {
+                indexByNodeId(nodeId) -> fragment
+            })
 
-        //    logger(1, "nodeById: " + fullGraph.getNodeById)
-        //    logger(1, "nodeWeights: " + nodeWeights.toList)
-        //    logger(1, "edgeWeights: " + edgeWeights.toList.map(_.toList.map(_.toList)))
+        // only one in each List of Node indexes may be in the final solution
+        val exclusions: Seq[List[Int]] = {
+            val excls = m.Map[Int, List[Int]]()
+            for (fragment <- candidateFragments;
+                 i <- fragment.span.start until fragment.span.end) {
+                excls += i -> (indexByNodeId(fragment.span.nodeIds.head) :: excls.getOrElse(i, Nil))
+            }
+            excls filter { case (k, v) => v.size > 1 }  // only need to add a constraint if there is a conflict
+        }.values.toSeq
+        // list of (nodeIds, edgeIds) sets
+        val mutuallyRequiredNodesAndEdges: List[MutuallyRequired] =
+            candidateFragments.map(fragment => {
+                val edges = fragment.edges map { case (srcId, label, destId) =>
+                    EdgeWithNodeIdxs(indexByNodeId(srcId), indexByNodeId(destId), label)
+                }
+                MutuallyRequired(fragment.span.nodeIds.map(indexByNodeId), edges)
+            }).filter { case MutuallyRequired(ns, edges) => ns.size + edges.size > 1 } // only need a constraint if there are more than one nodes or edges involved
+        // srcNodeIdx -> destNodeIdx -> [(label, weight)]
+        // TODO: don't need to score edges between mutually exclusive nodes
+        val edgeWeights: Array[Array[Array[(String, Double)]]] =
+            new GraphObj(fullGraph, candidateNodes, stage2Features).edgeWeights
+
         val (nodesInSolution, edgesInSolution) = ilpSolver.solve(
             nodeWeights,
             edgeWeights,
-            exclusionsByTokenId,
+            exclusions,
             mutuallyRequiredNodesAndEdges,
             labelSet.toMap
         )
 
-        //    logger(1, "Nodes in solution: " + nodesInSolution)
-        //    logger(1, "Edges in solution: " + edgesInSolution)
-        //    logger(1, s"candidateFragmentByNode: $candidateFragmentByNode")
-        var fragmentsToAdd = List[CandidateFragment]() // TODO
-        for (node <- nodesInSolution) {
-            if (candidateFragmentByNode.contains(node.id)) {
-                fragmentsToAdd = candidateFragmentByNode(node.id) :: fragmentsToAdd
-            }
-        }
+        val fragmentsToAdd = nodesInSolution.flatMap(candidateFragmentByNodeIdx.get)
+        val edgesInCandidateFragments = fragmentsToAdd.flatMap(_.edges).toSet
 
-        // edgesToAdd can't include the edges from the CandidateConcepts
-        var edgesToAdd = List[(String, String, String)]()
-        for (edge <- edgesInSolution) {
-            edgesToAdd = (edge.src.id, edge.label, edge.dest.id) :: edgesToAdd
-        }
-        //    logger(1, s"fragmentsToAdd: $fragmentsToAdd")
-        //    logger(1, s"edgesToAdd: $edgesToAdd")
-        //    logger(1, s"fullGraph nodes: ${fullGraph.getNodeById}")
+        val edgesToAdd = edgesInSolution.iterator.map(edge =>
+            (candidateNodes(edge.srcIdx).id, edge.label, candidateNodes(edge.destIdx).id)
+        ).filter(edge => !edgesInCandidateFragments.contains(edge)).seq
+
+        logger(1, s"fragmentsToAdd: $fragmentsToAdd")
+        logger(1, s"edgesToAdd: $edgesToAdd")
+        logger(1, s"fullGraph nodes: ${fullGraph.getNodeById}")
+
         var graph: Graph = Graph.empty()
         graph.getNodeById.clear()
         graph.getNodeByName.clear()
@@ -108,7 +109,8 @@ class IlpDecoder(stage1FeatureNames: List[String],
         for ((srcId, relation, destId) <- edgesToAdd) {
             val srcNode = graph.getNodeById(srcId)
             val destNode = graph.getNodeById(destId)
-            srcNode.relations = ((relation, destNode) :: srcNode.relations).toSet.toList // so we don't add edges in candidate fragments twice. TODO: inefficient
+            // TODO: don't we have to clear relations for all the nodes before we do this?
+            srcNode.relations = (relation, destNode) :: srcNode.relations //.toSet.toList // so we don't add edges in candidate fragments twice. TODO: inefficient
             feats += stage2Features.localFeatures(srcNode, destNode, relation)
         }
 
@@ -133,7 +135,7 @@ class IlpDecoder(stage1FeatureNames: List[String],
         logger(1, "\n--- getting candidate concepts ---\n")
         val sentence = input.sentence
         var candidateConcepts = List[CandidateFragment]()
-        val graph = Graph.empty
+        val graph = Graph.empty()
         graph.getNodeById.clear()
         graph.getNodeByName.clear()
         for (i <- Range(0, sentence.size)) {
@@ -143,7 +145,6 @@ class IlpDecoder(stage1FeatureNames: List[String],
             // WARNING: the code below assumes that anything in the conceptList will not extend beyond the end of the sentence (and it shouldn't based on the code in Concepts)
             for (concept <- conceptList) {
                 val end = i + concept.words.size
-                //        val score = stage1Features.localScore(input, concept, i, end)
                 val score = {
                     val localFeats = stage1Features.localFeatures(input, concept, i, end)
                     stage2Features.weights.dot(FastFeatureVector.fromBasicFeatureVector(localFeats, stage2Features.weights.labelset))

@@ -41,7 +41,8 @@ class IlpDecoderTest extends org.scalatest.FlatSpec with Matchers {
             List(
                 ("a-01", "b-01", ":r", 6.0),
                 ("b-01", "c-01", ":r", 5.0),
-                ("a-01", "c-01", ":r", 1.0)
+                ("a-01", "c-01", ":r", 1.0),
+                ("c-01", "a-01", ":r", -1.0)
             ),
             labelSet
         )
@@ -50,9 +51,9 @@ class IlpDecoderTest extends org.scalatest.FlatSpec with Matchers {
             None,
             sentence,
             Annotation(sentence, sentence, sentence),
-            Annotation(sentence, sentence, sentence.zipWithIndex.map({ case (tok, i) => Dependency(-1, i, "nsubj")})),
-            Annotation(sentence, sentence, sentence),
-            Annotation(sentence, sentence, Array())
+            dependencies = Annotation(sentence, sentence, sentence.zipWithIndex.map({ case (tok, i) => Dependency(-1, i, "nsubj")})),
+            pos = Annotation(sentence, sentence, sentence),
+            ner = Annotation(sentence, sentence, Array())
         ))
         logger(1, "Triples:")
         logger(1, result.graph.printTriples(detail = 1))

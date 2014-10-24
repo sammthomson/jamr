@@ -231,6 +231,9 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
         for (id <- span.nodeIds) {
             val node = fullGraph.getNodeById(id)
             getNodeById(id) = node
+            if (node.name != None){
+                getNodeByName(node.name.get) = node
+            }
             node.spans.clear()
             node.addSpan(spans.size - 1, span.coRef)
         }
@@ -441,7 +444,7 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
                     //assert(child.name != None, "Attempting to create a variable relation to a node without a variable name")
                     if (child.name != None) {
                         val Some(name) = child.name
-                        assert(getNodeByName.contains(name), "Variable name not in getNodeByName")
+                        assert(getNodeByName.contains(name), "Variable name not in getNodeByName: " + name)
                         node.variableRelations = (relation, Var(child, name)) :: node.variableRelations
                     } else {
                         logger(0, "WARNGING: Creating a variable relation to a node without a variable name - ignoring this relation in the topological ordering")

@@ -70,7 +70,7 @@ class TrainObj(val options : Map[Symbol, String]) extends edu.cmu.lti.nlp.amr.Tr
                 })+"\n")
         }
         //logger(0, "Dependencies:\n"+dependencies(i)+"\n")
-        logger(1, "Oracle features:\n"+result.features+"\n")
+//        logger(1, "Oracle features:\n"+result.features+"\n")
         return (result.features, result.score)
     }
 

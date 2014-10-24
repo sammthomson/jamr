@@ -6,12 +6,14 @@ import edu.cmu.lti.nlp.amr.graph.Edge._
 import edu.cmu.lti.nlp.amr.ilp.Ops._
 import edu.cmu.lti.nlp.amr.ilp._
 import net.sf.javailp
-import net.sf.javailp.Constraint
+import net.sf.javailp.{Term, Constraint}
 
 import scala.collection.immutable.IndexedSeq
 
 
 case class GraphNode(id: String)
+case class EdgeWithNodeIdxs(srcIdx: Int, destIdx: Int, label: String)
+
 case class Labeled[T](x: T, label: String)
 object Labeled {
   implicit def unwrap[T](labeled: Labeled[T]): T = labeled.x
@@ -21,77 +23,86 @@ class JamrIlpSolver(val ilpSolver: Solver) {
 
   def solve(nodeWeights: Seq[Double],
             edgeWeights: Array[Array[Array[(String, Double)]]],
-            exclusionsByTokenId: collection.Map[Int, List[Int]],
-            mutuallyRequiredNodesAndEdges: List[(List[Int], List[(Int, Int, String)])],
-            determinismByLabel: collection.Map[String, Int]): (IndexedSeq[GraphNode], Seq[Labeled[Edge[GraphNode]]]) = {
+            exclusions: Iterable[List[Int]],
+            mutuallyRequiredNodesAndEdges: List[MutuallyRequired],
+            determinismByLabel: collection.Map[String, Int]): (Seq[Int], Seq[EdgeWithNodeIdxs]) = {
     if (nodeWeights.isEmpty) {
         return (Vector(), Seq())
     }
     val realNodes: IndexedSeq[GraphNode] = (0 until nodeWeights.size).map(i => GraphNode(i.toString))
-    val dummyRoot = GraphNode("root")
+    val dummyRoot = GraphNode("rootedgeObjTerms")
     val dummyEdges: IndexedSeq[Labeled[Edge[GraphNode]]] = realNodes.map(n => Labeled(dummyRoot ~> n, "rootSelector"))
     val realEdges: Array[Array[Array[Labeled[Edge[GraphNode]]]]] =
-      edgeWeights.zip(realNodes).map { case (srcWeights, src) =>
-        srcWeights.zip(realNodes).map { case (destWeights, dest) =>
-          destWeights.map { case (label, weight) =>
-            Labeled(Edge(src, dest), label)
-          }
+        edgeWeights.zip(realNodes).map { case (srcWeights, src) =>
+            srcWeights.zip(realNodes).map { case (destWeights, dest) =>
+                destWeights.map { case (label, weight) =>
+                    Labeled(Edge(src, dest), label)
+                }
+            }
         }
-      }
-//    val labels: Map[String, Int] = edgeWeights.head.head.map(_._1).zipWithIndex.toMap
 
     /* Variables */
     val nodeVars = realNodes.map(n => BoolVar("n%s".format(n.id))).toSeq
-    val realEdgeVars = realEdges.map(_.map(_.map(toBoolVar)))
+    val realEdgeVars: Array[Array[Array[Labeled[BoolVar]]]] = realEdges.map(_.map(_.map(toBoolVar)))
     val dummyEdgeVars = dummyEdges map toBoolVar
     /* Constraints */
     val simpleGraphConstraints = getSimpleGraphConstraints(nodeVars, realEdgeVars, dummyEdgeVars)
     val (flowVars, flowConstraints) = getSingleCommodityFlowVarsAndConstraints(nodeVars, realEdgeVars, dummyEdgeVars)
     val determinismConstraints = getDeterminismConstraints(nodeVars, realEdgeVars, determinismByLabel) //, labels)
-    val exclusionConstraints = getExclusionConstraints(nodeVars, exclusionsByTokenId)
+    val exclusionConstraints = getExclusionConstraints(nodeVars, exclusions)
     val mutuallyRequiredConstraints = getMutuallyRequiredConstraints(nodeVars, realEdgeVars, mutuallyRequiredNodesAndEdges)
     val variables = nodeVars ++ realEdgeVars.toSeq.flatten.flatten.map(_.x) ++ dummyEdgeVars.map(_.x) ++ flowVars
     val constraints: Seq[Constraint] = simpleGraphConstraints ++
-      flowConstraints ++
-      determinismConstraints ++
-      exclusionConstraints ++
-      mutuallyRequiredConstraints
+        flowConstraints ++
+        determinismConstraints ++
+        exclusionConstraints ++
+        mutuallyRequiredConstraints
     /* Objective */
     val objective: Objective = {
-        val nodeObjTerms = nodeVars.zip(nodeWeights).map({case (n, w) => n * w}) //collect { case (nodeVar, weight) if weight != 0.0 => nodeVar * weight }
-        val edgeObjTerms: Seq[Linear] = realEdgeVars.toSeq.flatten.flatten.zip(edgeWeights.toSeq.flatten.flatten).map({case(e, (_, w)) => e.x * w}) //collect {
+        val nodeObjTerms = nodeVars.zip(nodeWeights).map({case (n, w) => new Term(n, w)}) //n * w}) //collect { case (nodeVar, weight) if weight != 0.0 => nodeVar * weight }
+        val edgeObjTerms: Seq[Term] = realEdgeVars.toSeq.flatten.flatten.zip(edgeWeights.toSeq.flatten.flatten).map({
+                case(e, (_, w)) => new Term(e.x, w) //e.x * w
+            }) //collect {
 //            case (edgeVar, (_, weight: Double)) if weight != 0.0 => edgeVar.x * weight
 //          }
-        Maximize((nodeObjTerms.toSeq ++ edgeObjTerms).reduce(plus))
+        Maximize(Linear(nodeObjTerms.toSeq ++ edgeObjTerms))
     }
     val problem = Problem(variables, objective, constraints)
 //    logger(1, s"problem: $problem")
     // solve it
     val result = ilpSolver.solve(problem)
 //    logger(1, s"result: $result")
-    val solnNodes = {
-      realNodes.zip(nodeVars).collect({ case (n, nodeVar) if result.getBoolean(nodeVar) => n })
+    val solnNodes: IndexedSeq[Int] = {
+        (0 until nodeWeights.size).zip(nodeVars).collect({ case (i, nodeVar) if result.getBoolean(nodeVar) => i })
     }
-    val solnEdges = (realEdges.toSeq.flatten.flatten zip realEdgeVars.toSeq.flatten.flatten).collect({
-      case (e, v) if e.src != dummyRoot && result.getBoolean(v.x) => e
-    })
+//    val solnEdges = (realEdges.toSeq.flatten.flatten zip realEdgeVars.toSeq.flatten.flatten).collect({
+//        case (e, v) if e.src != dummyRoot && result.getBoolean(v.x) => EdgeWithNodeIdxs(e.src
+//    })
+    val solnEdges =
+        for ((srcEdgeVars, srcIdx) <- realEdgeVars.zipWithIndex;
+             (destEdgeVars, destIdx) <- srcEdgeVars.zipWithIndex;
+             Labeled(edgeVar, label) <- destEdgeVars
+             if result.getBoolean(edgeVar)) yield {
+            EdgeWithNodeIdxs(srcIdx, destIdx, label)
+        }
+
     logger(1, s"solnNodes: $solnNodes")
     logger(1, s"solnEdges: $solnEdges")
     (solnNodes, solnEdges)
   }
 
-  def getExclusionConstraints(nodeVars: Seq[BoolVar], exclusionsByTokenIdx: collection.Map[Int, List[Int]]) = {
-    for ((tokenIdx, nodeIdxs) <- exclusionsByTokenIdx) yield {
+  def getExclusionConstraints(nodeVars: Seq[BoolVar], exclusions: Iterable[List[Int]]): Iterable[Constraint] = {
+    for (nodeIdxs <- exclusions) yield {
       nodeIdxs.map(nodeVars(_) * 1).reduce(plus) lteq 1
     }
   }
 
   def getMutuallyRequiredConstraints(realNodeVars: Seq[BoolVar],
                                      realEdgeVars: Array[Array[Array[Labeled[BoolVar]]]],
-                                     mutuallyRequiredNodesAndEdges: List[(List[Int], List[(Int, Int, String)])]): Seq[Constraint] = {
-    val constraints = for ((nodeIds, edges) <- mutuallyRequiredNodesAndEdges) yield {
+                                     mutuallyRequiredNodesAndEdges: List[MutuallyRequired]): Seq[Constraint] = {
+    val constraints = for (MutuallyRequired(nodeIds, edges) <- mutuallyRequiredNodesAndEdges) yield {
       val equalVars: List[BoolVar] = nodeIds.map(realNodeVars) ++ edges.flatMap({
-        case (srcId, destId, label) => realEdgeVars(srcId)(destId).collect({ case Labeled(e, `label`) => e })
+        case EdgeWithNodeIdxs(srcId, destId, label) => realEdgeVars(srcId)(destId).collect({ case Labeled(e, `label`) => e })
       })
       val representative = equalVars.head
       equalVars.map(v => v minus representative equiv 0)
