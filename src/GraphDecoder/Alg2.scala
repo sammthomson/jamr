@@ -1,20 +1,8 @@
 package edu.cmu.lti.nlp.amr.GraphDecoder
-import edu.cmu.lti.nlp.amr._
 import edu.cmu.lti.nlp.amr.FastFeatureVector._
+import edu.cmu.lti.nlp.amr._
 
-import java.lang.Math.abs
-import java.lang.Math.log
-import java.lang.Math.exp
-import java.lang.Math.random
-import java.lang.Math.floor
-import java.lang.Math.min
-import java.lang.Math.max
-import scala.io.Source
-import scala.util.matching.Regex
-import scala.collection.mutable.Map
-import scala.collection.mutable.Set
-import scala.collection.mutable.ArrayBuffer
-import scala.collection.mutable.PriorityQueue
+import scala.collection.mutable.{PriorityQueue, Set}
 
 class Alg2(featureNames: List[String], labelSet: Array[(String, Int)], connected: Boolean = true) extends Decoder {
     // Base class has defined:
@@ -55,11 +43,9 @@ class Alg2(featureNames: List[String], labelSet: Array[(String, Int)], connected
                 } else {
                     edgeWeights(i)(j) = Array.fill(labelSet.size)(("", 0.0))
                     val feats = features.localFeatures(nodes(i), nodes(j))
-                    features.weights.iterateOverLabels2(feats,
-                        x => { //logger(1, "These should be equal: " + x.value.toString + " " + features.localScore(nodes(i), nodes(j), features.weights.labelset(x.labelIndex).toString));
-                        //edgeWeights(i)(j)(x.labelIndex) = (features.weights.labelset(x.labelIndex), features.localScore(nodes(i), nodes(j), features.weights.labelset(x.labelIndex))) })
-                        edgeWeights(i)(j)(x.labelIndex) = (features.weights.labelset(x.labelIndex), x.value) })
-                    //logger(1, "edgeWeights("+i.toString+")("+j.toString+") = "+edgeWeights(i)(j).toList)
+                    for (x <- features.weights.conjoinedScores(feats)) {
+                        edgeWeights(i)(j)(x.labelIndex) = (features.weights.labelset(x.labelIndex), x.value)
+                    }
                 }
             }
         }

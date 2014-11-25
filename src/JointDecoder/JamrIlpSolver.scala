@@ -18,10 +18,11 @@ object Labeled {
   implicit def unwrap[T](labeled: Labeled[T]): T = labeled.x
 }
 
+// TODO: Don't need to have edges in concept fragments as vars (but they do need to be scored)
 class JamrIlpSolver(val ilpSolver: Solver) {
 
   def solve(nodeWeights: Seq[Double],
-            edgeWeights: Array[Array[Array[(String, Double)]]],
+            edgeWeights: Array[Array[Map[String, Double]]],
             exclusions: Iterable[List[Int]],
             mutuallyRequiredNodesAndEdges: List[MutuallyRequired],
             determinismByLabel: collection.Map[String, Int]): (Seq[Int], Seq[EdgeWithNodeIdxs]) = {
@@ -35,7 +36,7 @@ class JamrIlpSolver(val ilpSolver: Solver) {
     val realEdges: Array[Array[Array[Labeled[Edge[GraphNode]]]]] =
         edgeWeights.zip(realNodes).map { case (srcWeights, src) =>
             srcWeights.zip(realNodes).map { case (destWeights, dest) =>
-                destWeights.map { case (label, weight) =>
+                destWeights.toArray.map { case (label, weight) =>
                     Labeled(Edge(src, dest), label)
                 }
             }
@@ -60,27 +61,20 @@ class JamrIlpSolver(val ilpSolver: Solver) {
     /* Objective */
     val objective: Objective = {
         val nodeObjTerms = nodeVars.zip(nodeWeights).collect { case (n, w) if w != 0.0 => n * w }
-        val edgeObjTerms = realEdgeVars.toSeq.flatten.flatten.zip(edgeWeights.toSeq.flatten.flatten).map({
-                case(e, (_, w)) => e.x * w
-            }) //collect {
-//            case (edgeVar, (_, weight: Double)) if weight != 0.0 => edgeVar.x * weight
-//          }
+        val edgeObjTerms = realEdgeVars.toSeq.flatten.flatten.zip(edgeWeights.toSeq.flatten.flatten).collect({
+                case(e, (_, w)) if w != 0.0 => e.x * w
+            })
         Maximize(Linear(nodeObjTerms.toSeq ++ edgeObjTerms))
     }
     val problem = Problem(variables, objective, constraints)
-//    logger(1, s"problem: $problem")
     // solve it
     logger(1, "sending ILP problem to Gurobi")
 
     val result = ilpSolver.solve(problem)
     logger(1, "got ILP solution from Gurobi")
-//    logger(1, s"result: $result")
     val solnNodes: IndexedSeq[Int] = {
         (0 until nodeWeights.size).zip(nodeVars).collect({ case (i, nodeVar) if result.getBoolean(nodeVar) => i })
     }
-//    val solnEdges = (realEdges.toSeq.flatten.flatten zip realEdgeVars.toSeq.flatten.flatten).collect({
-//        case (e, v) if e.src != dummyRoot && result.getBoolean(v.x) => EdgeWithNodeIdxs(e.src
-//    })
     val solnEdges =
         for ((srcEdgeVars, srcIdx) <- realEdgeVars.zipWithIndex;
              (destEdgeVars, destIdx) <- srcEdgeVars.zipWithIndex;

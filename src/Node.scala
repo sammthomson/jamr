@@ -1,7 +1,6 @@
 package edu.cmu.lti.nlp.amr
 
-import scala.util.matching.Regex
-import scala.collection.mutable.{Map, Set, ArrayBuffer}
+import scala.collection.mutable.{ArrayBuffer, Set}
 
 case class Var(node: Node, name: String)    // TODO: Remove this? Var is redundant, because the name can be found using node.name (but node.name sometimes can be None, which it should not be)
 
@@ -37,7 +36,7 @@ case class Node(var id: String, var name: Option[String], concept: String, var r
         }
     }
 
-    override def toString() : String = {
+    override def toString: String = {
         prettyString(0, false, Set.empty[String])
     }
 
@@ -106,6 +105,23 @@ case class Node(var id: String, var name: Option[String], concept: String, var r
                             variableRelations.map(x => prefix+x._1+" ["+x._2.node.id+"] "+x._2.name)).mkString(" ")+")"
             }
         }
+    }
+
+    /** Whether or not this node is a PropBank-style predicate, and so can take ":ARGN" arguments */
+    def takesArgs: Boolean = {
+        val len = concept.size
+        len > 3 &&
+            concept(len - 1).isDigit &&
+            concept(len - 2).isDigit &&
+            concept(len - 3) == '-'
+    }
+
+    /** Whether or not this node can take ":opN" arguments */
+    def takesOps: Boolean = concept == "and" || concept == "or" || concept == "name"
+
+    /** Whether or not this node is a constant (as opposed to a variable node) */
+    def isConstant: Boolean = {
+        concept.startsWith("\"") || concept == "-" || concept.forall(_.isDigit)
     }
 }
 

@@ -2,7 +2,7 @@ package edu.cmu.lti.nlp.amr.JointDecoder
 
 import edu.cmu.lti.nlp.amr.ConceptInvoke.PhraseConceptPair
 import edu.cmu.lti.nlp.amr.FastFeatureVector._
-import edu.cmu.lti.nlp.amr.GraphDecoder.GraphObj
+import edu.cmu.lti.nlp.amr.GraphDecoder.Features
 import edu.cmu.lti.nlp.amr._
 
 import scala.collection.{mutable => m}
@@ -17,6 +17,9 @@ case class CandidateFragment(concepts: PhraseConceptPair,
 case class MutuallyRequired(nodeIds: List[Int], edges: List[EdgeWithNodeIdxs])
 
 
+/**
+ * JointDecoder.Decoder that works by calling an external ILP solver like Gurobi or CPLEX
+ */
 class IlpDecoder(stage1FeatureNames: List[String],
                  phraseConceptPairs: Array[ConceptInvoke.PhraseConceptPair], // this is the concept table
                  stage2FeatureNames: List[String],
@@ -42,8 +45,7 @@ class IlpDecoder(stage1FeatureNames: List[String],
 
         stage2Features.graph = fullGraph
 
-        //        assert(fullGraph.nodes.forall(_.name != None), "all nodes should have a name: " + fullGraph.nodes.toList.map(n => n.concept + " " + n.name))
-        val candidateNodes: Array[Node] = fullGraph.nodes.toArray //.sortBy(_.id)
+        val candidateNodes: Array[Node] = fullGraph.nodes.toArray
         val indexByNodeId: Map[String, Int] = candidateNodes.zipWithIndex.map({ case (node, i) => node.id -> i}).toMap
         val scoresByRootNodeId: Map[String, Double] =
             candidateFragments.map(fragment => fragment.span.nodeIds.head -> fragment.score).toMap
@@ -71,11 +73,13 @@ class IlpDecoder(stage1FeatureNames: List[String],
                     EdgeWithNodeIdxs(indexByNodeId(srcId), indexByNodeId(destId), label)
                 }
                 MutuallyRequired(fragment.span.nodeIds.map(indexByNodeId), edges)
-            }).filter { case MutuallyRequired(ns, edges) => ns.size + edges.size > 1 } // only need a constraint if there are more than one nodes or edges involved
-        // srcNodeIdx -> destNodeIdx -> [(label, weight)]
-        // TODO: don't need to score edges between mutually exclusive nodes
-        val edgeWeights: Array[Array[Array[(String, Double)]]] =
-            new GraphObj(fullGraph, candidateNodes, stage2Features).edgeWeights
+            }).filter {
+                // only need a constraint if there are more than one nodes or edges involved
+                case MutuallyRequired(ns, edges) => ns.size + edges.size > 1
+            }
+
+        val edgeWeights: Array[Array[Map[String, Double]]] =
+            scoreEdges(fullGraph, candidateNodes, stage2Features)
 
         val (nodesInSolution, edgesInSolution) = ilpSolver.solve(
             nodeWeights,
@@ -143,7 +147,6 @@ class IlpDecoder(stage1FeatureNames: List[String],
             logger(2, "word = " + sentence(i))
             val conceptList = conceptInvoker.invoke(input, i)
             logger(2, "Possible invoked concepts: " + conceptList)
-            // WARNING: the code below assumes that anything in the conceptList will not extend beyond the end of the sentence (and it shouldn't based on the code in Concepts)
             for (concept <- conceptList) {
                 val end = i + concept.words.size
                 val score = {
@@ -158,5 +161,67 @@ class IlpDecoder(stage1FeatureNames: List[String],
         }
         graph.normalizeInverseRelations()
         (graph, candidateConcepts)
+    }
+
+    /**
+     * a rule-based pruner so we don't have to consider every label for every edge
+     * - Constants can't have outgoing labels, can only have incoming ":op"s?
+     * - "name"s can only have incoming ":name" and outgoing ":op"s
+     * - PropBank XX-01 style concepts won't have ":op" or ":name"
+     * - things that don't end in "-01" might not have ":arg"s
+     * - "and"s and "or"s can only have ":ops"
+     * - "-" can only have ":polarity" incoming
+     */
+    def validEdgeLabel(label: String, src: Node, dest: Node): Boolean = {
+        if (src.concept == "name") {
+            label == ":op"
+        } else if (dest.concept == "name") {
+            label == ":name"
+        } else if (label == ":name") {
+            false
+        } else if (dest.concept == "-") {
+            label == ":polarity"
+        } else if (src.isConstant) {
+            false
+        } else if (dest.isConstant) {
+            label == ":op"
+        } else if (src.takesArgs) {
+            !Seq(":op", ":name").contains(label)
+        } else if (label.startsWith(":ARG")) {
+            false
+        } else if (src.takesOps) {
+            label.startsWith(":op")
+        } else {
+            true
+        }
+    }
+
+    /** TODO:
+      * Don't need to score edges that compete with concept fragments
+      * Don't need to score edges between concept fragments that overlap
+      */
+    def scoreEdges(graph: Graph,
+                   nodes: Array[Node],
+                   features: Features): Array[Array[Map[String, Double]]] = {
+        for (srcIdx <- (0 until nodes.size).toArray) yield {
+            for (destIdx <- (0 until nodes.size).toArray) yield {
+                if (srcIdx == destIdx) {
+                    Map.empty[String, Double]
+                } else {
+                    val src = nodes(srcIdx)
+                    val dest = nodes(destIdx)
+                    // TODO: would be nice to prune before we calculate features
+                    val feats = features.localFeatures(src, dest)
+                    val edgeScores = for(
+                        Conjoined(labelIdx, value) <- features.weights.conjoinedScores(feats);
+                        label = features.weights.labelset(labelIdx)
+                        if validEdgeLabel(label, src, dest)
+                    ) yield {
+                        label -> value
+                    }
+                    edgeScores.toMap
+                }
+            }
+        }
     }
 }

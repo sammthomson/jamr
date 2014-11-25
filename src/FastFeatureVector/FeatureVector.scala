@@ -1,5 +1,4 @@
 package edu.cmu.lti.nlp.amr.FastFeatureVector
-import edu.cmu.lti.nlp.amr._
 import edu.cmu.lti.nlp.amr.Train.AbstractFeatureVector
 
 import scala.math.sqrt
@@ -50,23 +49,27 @@ case class FeatureVector(labelset : Array[String],
             f(Conjoined(i, unconjoinedTotal + conjoinedTotal(i)))
         }
     }
-    def iterateOverLabels2(v: List[(String, Value, immutable.Map[Int, Double])], f: (Conjoined) => Unit) {
-        var unconjoinedTotal : Double = 0.0
-        val conjoinedTotal : Array[Double] = labelset.map(x => 0.0)
-        for ((feature, value, conjoinedMap) <- v if fmap.contains(feature)) {
-            val myValues : ValuesMap = fmap(feature)
-            unconjoinedTotal += myValues.unconjoined * value.unconjoined
-            for ((labelIndex, value) <- conjoinedMap) {   // reusing value name, but it's ok
-                conjoinedTotal(labelIndex) += myValues.unconjoined * value
+
+    def conjoinedScores(v: List[(String, Value, immutable.Map[Int, Double])]): Iterator[Conjoined] = {
+        var unconjoinedTotal: Double = 0.0
+        val conjoinedTotal: Array[Double] = Array.fill(labelset.size)(0.0)
+        for (
+            (feature, value, conjoinedMap) <- v;
+            myWeights <- fmap.get(feature)
+        ) {
+            unconjoinedTotal += myWeights.unconjoined * value.unconjoined
+            for ((labelIdx, conjoinedVal) <- conjoinedMap) {
+                conjoinedTotal(labelIdx) += myWeights.unconjoined * conjoinedVal
             }
-            for (myValue <- myValues.conjoined) {
-                conjoinedTotal(myValue._1) += myValue._2 * value.conjoined
+            for ((labelIdx, conjoinedWeight) <- myWeights.conjoined) {
+                conjoinedTotal(labelIdx) += conjoinedWeight * value.conjoined
             }
         }
-        for (i <- 0 until labelset.size) {
-            f(Conjoined(i, unconjoinedTotal + conjoinedTotal(i)))
+        for ((conjoinedTot, i) <- conjoinedTotal.iterator.zipWithIndex) yield {
+            Conjoined(i, unconjoinedTotal + conjoinedTot)
         }
     }
+
     def apply(feature: String, label: Option[Int]) : Double = {
         if (fmap.contains(feature)) {
             if (label == None) {

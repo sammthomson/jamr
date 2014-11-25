@@ -446,9 +446,11 @@ case class Graph(var root: Node, spans: ArrayBuffer[Span], getNodeById: Map[Stri
                         val Some(name) = child.name
                         assert(getNodeByName.contains(name), "Variable name not in getNodeByName: " + name)
                         node.variableRelations = (relation, Var(child, name)) :: node.variableRelations
-                    } else {
-                        logger(0, "WARNGING: Creating a variable relation to a node without a variable name - ignoring this relation in the topological ordering")
-                        assert(false, "WARNGING: Attempted to create a variable relation to a node without a variable name")
+                    } else if (!node.isConstant) {
+                        // concepts always have size > 0 (enforced by GraphParser)
+                        val varName = getNextVariableName(node.concept.toLowerCase()(0))
+                        getNodeByName(varName) = node
+                        node.name = Some(varName)
                     }
                 } else if (!visited.contains(child.id)) {
                     // this node goes into the topological ordering

@@ -5,8 +5,13 @@
 /project/boot
 /project/project
 /experiments
+
 # LDC data
 /data
+
 # IntelliJ cruft
 .idea
 *.iml
+
+# gurobi log
+gurobi.log
