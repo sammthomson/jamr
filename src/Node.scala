@@ -107,17 +107,15 @@ case class Node(var id: String, var name: Option[String], concept: String, var r
         }
     }
 
-    /** Whether or not this node is a PropBank-style predicate, and so can take ":ARGN" arguments */
-    def takesArgs: Boolean = {
+    /** Whether or not this node is a PropBank-style predicate */
+    def isPropBank: Boolean = {
+        // must end in a dash followed by two or three digit number
         val len = concept.size
         len > 3 &&
             concept(len - 1).isDigit &&
             concept(len - 2).isDigit &&
-            concept(len - 3) == '-'
+            (concept(len - 3) == '-' || (len > 4 && concept(len - 3).isDigit && concept(len - 4) == '-'))
     }
-
-    /** Whether or not this node can take ":opN" arguments */
-    def takesOps: Boolean = concept == "and" || concept == "or" || concept == "name"
 
     /** Whether or not this node is a constant (as opposed to a variable node) */
     def isConstant: Boolean = {

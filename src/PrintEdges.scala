@@ -29,28 +29,28 @@ object PrintEdges extends App {
 
     val allEdges = Edges.getAllEdges(trainFilename)
 
+    val pruner = new EdgePruner
+
     println(Seq(
         "src.concept",
-        "src.takesArgs",
-        "src.takesOps",
+        "src.isPropBank",
         "src.isConstant",
         "relation",
         "dest.concept",
-        "dest.takesArgs",
-        "dest.takesOps",
-        "dest.isConstant"
+        "dest.isPropBank",
+        "dest.isConstant",
+        "validEdge"
     ).mkString("\t"))
     for ((src, relation, dest) <- allEdges) {
         println(Seq(
             src.concept,
-            src.takesArgs,
-            src.takesOps,
+            src.isPropBank,
             src.isConstant,
             relation,
             dest.concept,
-            dest.takesArgs,
-            dest.takesOps,
-            dest.isConstant
+            dest.isPropBank,
+            dest.isConstant,
+            if (pruner.validEdge(src, dest, relation)) "1" else 0
         ).mkString("\t"))
     }
 }

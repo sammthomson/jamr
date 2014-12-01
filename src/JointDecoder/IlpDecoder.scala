@@ -35,6 +35,8 @@ class IlpDecoder(stage1FeatureNames: List[String],
 
     val ilpSolver = JamrIlpSolver.gurobi
 
+    val pruner = new EdgePruner
+
     def decode(input: Input): FastFeatureVector.DecoderResult = {
         logger(1, s"begin joint decoding ${input.sentence.mkString(" ")}")
         stage2Features.input = input
@@ -163,39 +165,6 @@ class IlpDecoder(stage1FeatureNames: List[String],
         (graph, candidateConcepts)
     }
 
-    /**
-     * a rule-based pruner so we don't have to consider every label for every edge
-     * - Constants can't have outgoing labels, can only have incoming ":op"s?
-     * - "name"s can only have incoming ":name" and outgoing ":op"s
-     * - PropBank XX-01 style concepts won't have ":op" or ":name"
-     * - things that don't end in "-01" might not have ":arg"s
-     * - "and"s and "or"s can only have ":ops"
-     * - "-" can only have ":polarity" incoming
-     */
-    def validEdgeLabel(label: String, src: Node, dest: Node): Boolean = {
-        if (src.concept == "name") {
-            label == ":op"
-        } else if (dest.concept == "name") {
-            label == ":name"
-        } else if (label == ":name") {
-            false
-        } else if (dest.concept == "-") {
-            label == ":polarity"
-        } else if (src.isConstant) {
-            false
-        } else if (dest.isConstant) {
-            label == ":op"
-        } else if (src.takesArgs) {
-            !Seq(":op", ":name").contains(label)
-        } else if (label.startsWith(":ARG")) {
-            false
-        } else if (src.takesOps) {
-            label.startsWith(":op")
-        } else {
-            true
-        }
-    }
-
     /** TODO:
       * Don't need to score edges that compete with concept fragments
       * Don't need to score edges between concept fragments that overlap
@@ -215,7 +184,7 @@ class IlpDecoder(stage1FeatureNames: List[String],
                     val edgeScores = for(
                         Conjoined(labelIdx, value) <- features.weights.conjoinedScores(feats);
                         label = features.weights.labelset(labelIdx)
-                        if validEdgeLabel(label, src, dest)
+                        if pruner.validEdge(src, dest, label)
                     ) yield {
                         label -> value
                     }
